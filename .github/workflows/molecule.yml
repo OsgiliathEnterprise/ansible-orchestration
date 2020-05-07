@@ -25,14 +25,16 @@ jobs:
 
     - name: install lint prerequisite
       run: |
-        sudo apt -y install python3-setuptools ansible-lint
+        sudo apt-get update
+        sudo apt -y install python3-setuptools ansible-lint vagrant
+
 
     - name: Install molecule
       run: |
         sudo apt update
-        sudo apt -y install python3-setuptools python3 python3-pip docker
+        sudo apt -y install python3-setuptools python3 python3-pip
         sudo pip3 install wheel
-        sudo pip3 install docker molecule testinfra yamllint ansible-lint flake8
+        sudo pip3 install molecule testinfra yamllint ansible-lint flake8 molecule-vagrant
 
     - name: molecule lint
       run: |
@@ -49,23 +51,3 @@ jobs:
       run: |
         molecule dependency
 
-  molecule:
-    runs-on: ubuntu-latest
-      # Steps represent a sequence of tasks that will be executed as part of the job
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Install molecule
-      run: |
-        sudo apt update
-        sudo apt -y install python3-setuptools python3 python3-pip docker
-        sudo pip3 install wheel
-        sudo pip3 install docker molecule testinfra yamllint ansible-lint flake8
-
-    - name: install prereq
-      run: |
-        ./configure
-
-    - name: execute molecule
-      run: |
-        molecule test
