@@ -47,7 +47,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: install prereq
       run: |
-        ./configure
+        molecule dependency
 
   molecule:
     runs-on: ubuntu-latest
