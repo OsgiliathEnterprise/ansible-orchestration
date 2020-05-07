@@ -26,4 +26,4 @@ before_install:
 
 script:
   - |
-    sudo molecule test --scenario-name kvm
+    travis_wait 30 sudo molecule test --scenario-name kvm
