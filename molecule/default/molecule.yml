@@ -11,7 +11,7 @@ driver:
 lint: yamllint . && flake8 && ansible-lint --exclude=meta
 platforms:
   - name: Fedora-Molecule-Orchestration-VB
-    box: tcharl/fedora-31-cgroupv1
+    box: fedora/31-cloud-base
     cpus: 8
     memory: 12288
     provider_raw_config_args:
