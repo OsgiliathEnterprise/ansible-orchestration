@@ -16,4 +16,6 @@
   vars:
     ansible_become: true
     kubernetes_version_kubeadm: "{{ kube_version_kubeadm }}"
-    kubernetes_apiserver_advertise_address: "{{ masterfacts.ansible_facts.ansible_default_ipv4.address|default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    kubernetes_apiserver_advertise_address: >
+      {{ masterfacts.ansible_facts.ansible_default_ipv4.address|
+      default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}
