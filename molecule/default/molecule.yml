@@ -2,7 +2,7 @@
 dependency:
   name: galaxy
   options:
-    role-file: requirements.yml
+    role-file: molecule/requirements.yml
     roles-path: ../community
 driver:
   name: vagrant
@@ -16,10 +16,23 @@ platforms:
     memory: 12288
     provider_raw_config_args:
       - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
+    instance_raw_config_args:
+      - "vm.network :forwarded_port, guest: 6752, host: 6752, protocol: 'tcp'"
+      - "vm.network :forwarded_port, guest: 6753, host: 6753, protocol: 'tcp'"
+    provider_override_args:
+      - "persistent_storage.enabled = true"
+      - "persistent_storage.location = 'molecule-orchestration.vdi'"
+      - "persistent_storage.size = 7000"
+      - "persistent_storage.mount = false"
+      - "persistent_storage.diskdevice = '/dev/sdb'"
+
 provisioner:
   name: ansible
   env:
     ANSIBLE_ROLES_PATH: ../../..:../../../community
+  inventory:
+    links:
+      group_vars: ../group_vars
 verifier:
   name: testinfra
   env:

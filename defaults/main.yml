@@ -1,4 +1,4 @@
 ---
 # defaults file for ansible-orchestration
-orchestrator_data_dir: /var/lib/minikube
-orchestrator_virtualization_group: libvirt
+kubernetes_allow_pods_on_master: false
+kube_version_kubeadm: 1.18.3

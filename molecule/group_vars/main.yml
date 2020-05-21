@@ -1,0 +1,6 @@
+---
+
+kube_master:
+  kubernetes_role: master
+kube_node:
+  kubernetes_role: node

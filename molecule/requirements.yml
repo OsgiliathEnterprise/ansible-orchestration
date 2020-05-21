@@ -4,27 +4,63 @@ roles:
   - name: geerlingguy.kubernetes
     source: https://galaxy.ansible.com
     path: ../community
-  - name: geerlingguy.docker
+
+  - name: tcharl.ansible_routing
     source: https://galaxy.ansible.com
     path: ../community
-  - name: tcharl.containerization
-    source: https://galaxy.ansible.com
-    path: ../community
-  - name: tcharl.ansible_volumes
-    source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_manage_lvm
     source: https://galaxy.ansible.com
     path: ../community
+
+  - name: tcharl.ansible_volumes
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: tcharl.ansible_users
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: robertdebock.users
+    source: https://galaxy.ansible.com
+    path: ../community
+
   - name: tcharl.hostname
     source: https://galaxy.ansible.com
     path: ../community
+
   - name: tcharl.ansible_nameserver
     source: https://galaxy.ansible.com
     path: ../community
+
   - name: robertdebock.bootstrap
     source: https://galaxy.ansible.com
     path: ../community
+
   - name: robertdebock.core_dependencies
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: tcharl.ansible_virtualization
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: tcharl.virtualization_guest
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: tcharl.ansible_role_libvirt_host
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: stackhpc.libvirt-vm
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: geerlingguy.docker
+    source: https://galaxy.ansible.com
+    path: ../community
+
+  - name: tcharl.ansible_containerization
     source: https://galaxy.ansible.com
     path: ../community
