@@ -7,7 +7,7 @@ roles:
   - name: geerlingguy.docker
     source: https://galaxy.ansible.com
     path: ../community
-  - name: tcharl.containerization
+  - name: tcharl.ansible_containerization
     source: https://galaxy.ansible.com
     path: ../community
   - name: tcharl.ansible_volumes
