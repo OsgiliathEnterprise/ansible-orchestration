@@ -28,3 +28,10 @@ roles:
   - name: robertdebock.core_dependencies
     source: https://galaxy.ansible.com
     path: ../community
+  - name: robertdebock.reboot
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: tcharl.ansible_routing
+    source: https://galaxy.ansible.com
+    path: ../community
+
