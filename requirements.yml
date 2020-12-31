@@ -34,4 +34,3 @@ roles:
   - name: tcharl.ansible_routing
     source: https://galaxy.ansible.com
     path: ../community
-
