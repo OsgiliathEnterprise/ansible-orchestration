@@ -11,7 +11,7 @@ driver:
 lint: yamllint . && flake8 && ansible-lint --exclude=meta
 platforms:
   - name: Fedora-Molecule-Orchestration-KVM
-    box: tcharl/fedora-31-cgroupv1
+    box: fedora/33-cloud-base
     provider_options:
       driver: '"kvm"'
       cpus: 4
@@ -29,7 +29,20 @@ provisioner:
       forks: 20
     ssh_connection:
       pipelining: true
-      ssh_args: -o ControlMaster=auto -o ControlPersist=600s
+      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
+  inventory:
+    group_vars:
+      kube_master:
+        kubernetes_role: master
+        ns_hostname: "master.osgiliath.net"
+        kubernetes_pod_network:
+          cni: 'flannel'
+          cidr: '10.128.0.0/16'
+        hostname_reboot: false
+      kube_node:
+        kubernetes_role: node
+        ns_hostname: "node.osgiliath.net"
+        hostname_reboot: false
   env:
     ANSIBLE_ROLES_PATH: ../../..:../../../community
 verifier:

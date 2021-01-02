@@ -10,6 +10,18 @@
     var: masterfacts
     verbosity: 3
 
+- name: ansible-orchestration | include firewalld role
+  import_role:
+    name: tcharl.ansible_routing
+  vars:
+    firewalld_zones:
+      - name: public
+        enabled_ports:
+          - port: 6443
+            protocol: tcp
+          - port: 10250
+            protocol: tcp
+
 - name: ansible-orchestration | include kubernetes role
   include_role:
     name: geerlingguy.kubernetes

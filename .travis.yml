@@ -37,3 +37,6 @@ install:
   - sudo chmod o+rwx /var/run/libvirt/libvirt-sock
 
 script: travis_wait 180 molecule --debug test --scenario-name kvm
+branches:
+  only:
+    - master

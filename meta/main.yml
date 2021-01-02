@@ -51,6 +51,7 @@ galaxy_info:
 
 dependencies:
   - { role: tcharl.ansible_containerization }
+  - { role: geerlingguy.swap, become: true, swap_file_state: absent }
   - { role: robertdebock.core_dependencies, become: true }
   - { role: robertdebock.bootstrap, become: true }
   - { role: tcharl.ansible_nameserver }

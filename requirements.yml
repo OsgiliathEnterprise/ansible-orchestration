@@ -4,6 +4,12 @@ roles:
   - name: geerlingguy.kubernetes
     source: https://galaxy.ansible.com
     path: ../community
+  - name: geerlingguy.kubernetes
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: geerlingguy.swap
+    source: https://galaxy.ansible.com
+    path: ../community
   - name: geerlingguy.docker
     source: https://galaxy.ansible.com
     path: ../community
