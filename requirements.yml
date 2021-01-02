@@ -4,10 +4,16 @@ roles:
   - name: geerlingguy.kubernetes
     source: https://galaxy.ansible.com
     path: ../community
+  - name: geerlingguy.kubernetes
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: geerlingguy.swap
+    source: https://galaxy.ansible.com
+    path: ../community
   - name: geerlingguy.docker
     source: https://galaxy.ansible.com
     path: ../community
-  - name: tcharl.containerization
+  - name: tcharl.ansible_containerization
     source: https://galaxy.ansible.com
     path: ../community
   - name: tcharl.ansible_volumes
@@ -26,5 +32,11 @@ roles:
     source: https://galaxy.ansible.com
     path: ../community
   - name: robertdebock.core_dependencies
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: robertdebock.reboot
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: tcharl.ansible_routing
     source: https://galaxy.ansible.com
     path: ../community

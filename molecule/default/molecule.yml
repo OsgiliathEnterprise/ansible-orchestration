@@ -11,14 +11,14 @@ driver:
 lint: yamllint . && flake8 && ansible-lint --exclude=meta
 platforms:
   - name: Fedora-Molecule-Orchestration-VB
-    box: fedora/31-cloud-base
+    box: fedora/33-cloud-base
     cpus: 8
     memory: 12288
     provider_raw_config_args:
       - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
     instance_raw_config_args:
-      - "vm.network :forwarded_port, guest: 6752, host: 6752, protocol: 'tcp'"
-      - "vm.network :forwarded_port, guest: 6753, host: 6753, protocol: 'tcp'"
+      - "vm.network :forwarded_port, guest: 22022, host: 22022, protocol: 'tcp'"
+      - "vm.network :forwarded_port, guest: 23022, host: 23022, protocol: 'tcp'"
     provider_override_args:
       - "persistent_storage.enabled = true"
       - "persistent_storage.location = 'molecule-orchestration.vdi'"
@@ -28,11 +28,27 @@ platforms:
 
 provisioner:
   name: ansible
+  config_options:
+    defaults:
+      forks: 20
+    ssh_connection:
+      pipelining: true
+      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   env:
     ANSIBLE_ROLES_PATH: ../../..:../../../community
   inventory:
-    links:
-      group_vars: ../group_vars
+    group_vars:
+      kube_master:
+        kubernetes_role: master
+        ns_hostname: "master.osgiliath.net"
+        kubernetes_pod_network:
+          cni: 'flannel'
+          cidr: '10.128.0.0/16'
+        hostname_reboot: false
+      kube_node:
+        kubernetes_role: node
+        ns_hostname: "node.osgiliath.net"
+        hostname_reboot: false
 verifier:
   name: testinfra
   env:
