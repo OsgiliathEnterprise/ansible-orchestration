@@ -39,7 +39,7 @@ roles:
     path: ../community
 
   - name: tcharl.ansible_virtualization_guest
-    source: https://galaxy.ansible.com
+    src: https://github.com/OsgiliathEnterprise/ansible-virtualization-guest/archive/master.tar.gz # don't know why it does not support galaxy
     path: ../community
   - name: tcharl.ansible_users
     source: https://galaxy.ansible.com
