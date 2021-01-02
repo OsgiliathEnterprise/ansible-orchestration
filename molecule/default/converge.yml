@@ -47,9 +47,9 @@
         interfaces:
           - network: default
   tasks:
-    - name: "Include ansible-virtualization-guest"
+    - name: "Include ansible_virtualization_guest"
       import_role:
-        name: tcharl.ansible-virtualization-guest
+        name: tcharl.ansible_virtualization_guest
 
     - name: "reloading firewalld"
       service:
