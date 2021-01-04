@@ -12,8 +12,8 @@ lint: yamllint . && flake8 && ansible-lint --exclude=meta
 platforms:
   - name: Fedora-Molecule-Orchestration-VB
     box: fedora/33-cloud-base
-    cpus: 8
-    memory: 12288
+    cpus: 6
+    memory: 8192
     provider_raw_config_args:
       - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
     instance_raw_config_args:
@@ -22,18 +22,20 @@ platforms:
     provider_override_args:
       - "persistent_storage.enabled = true"
       - "persistent_storage.location = 'molecule-orchestration.vdi'"
-      - "persistent_storage.size = 7000"
+      - "persistent_storage.size = 15000"
       - "persistent_storage.mount = false"
       - "persistent_storage.diskdevice = '/dev/sdb'"
 
 provisioner:
   name: ansible
-  config_options:
-    defaults:
-      forks: 20
-    ssh_connection:
-      pipelining: true
-      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
+#  config_options:
+#    defaults:
+#      forks: 20
+#      gather_timeout: 20
+#      timeout: 60
+#    ssh_connection:
+#      pipelining: true
+#      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   env:
     ANSIBLE_ROLES_PATH: ../../..:../../../community
   inventory:

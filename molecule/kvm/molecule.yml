@@ -14,8 +14,8 @@ platforms:
     box: fedora/33-cloud-base
     provider_options:
       driver: '"kvm"'
-      cpus: 4
-      memory: 4096
+      cpus: 6
+      memory: 8192
     instance_raw_config_args:
       - "vm.network :forwarded_port, guest: 22022, host: 22022, protocol: 'tcp'"
       - "vm.network :forwarded_port, guest: 23022, host: 23022, protocol: 'tcp'"
@@ -24,12 +24,12 @@ platforms:
       - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
 provisioner:
   name: ansible
-  config_options:
-    defaults:
-      forks: 20
-    ssh_connection:
-      pipelining: true
-      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
+#  config_options:
+#    defaults:
+#      forks: 20
+#   ssh_connection:
+#     pipelining: true
+#      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   inventory:
     group_vars:
       kube_master:
