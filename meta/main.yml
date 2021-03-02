@@ -1,5 +1,6 @@
 galaxy_info:
-  author: Charlie Mordant
+  role_name: ansible_orchestration
+  author: OsgiliathEnterprise
   description: Wrapper role over the wonderful https://github.com/geerlingguy/ansible-role-kubernetes
   company: Osgiliath Inc.
 
