@@ -12,13 +12,25 @@ lint: yamllint . && flake8 && ansible-lint --exclude=meta
 platforms:
   - name: Fedora-Molecule-Orchestration-VB
     box: fedora/33-cloud-base
-    cpus: 6
-    memory: 8192
+    provider_options:
+      cpus: 6
+      memory: 8192
     provider_raw_config_args:
       - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
+      - "customize ['storagectl', :id, '--name', 'IDE', '--hostiocache', 'on']"
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        type: dhcp
+      - network_name: forwarded_port
+        guest: 22022
+        host: 22022
+      - network_name: forwarded_port
+        guest: 23022
+        host: 23022
     instance_raw_config_args:
-      - "vm.network :forwarded_port, guest: 22022, host: 22022, protocol: 'tcp'"
-      - "vm.network :forwarded_port, guest: 23022, host: 23022, protocol: 'tcp'"
+      - "cache.enable :dnf"
+      - "cache.auto_detect = false"
     provider_override_args:
       - "persistent_storage.enabled = true"
       - "persistent_storage.location = 'molecule-orchestration.vdi'"

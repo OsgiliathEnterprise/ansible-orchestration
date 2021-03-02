@@ -20,7 +20,7 @@
         netmask: 255.255.255.0
         dhcp_start: 192.168.122.10
         dhcp_end: 192.168.122.200
-    users_group_list:
+    users_group_list2:
       - name: libvirt
     systemusers_user_list:
       - name: libvirt
