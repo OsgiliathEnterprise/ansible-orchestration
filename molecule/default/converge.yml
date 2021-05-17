@@ -15,7 +15,7 @@
     libvirt_host_networks:
       - name: default
         mode: nat
-        bridge: vibr0
+        bridge: virbr0
         ip: 192.168.122.1
         netmask: 255.255.255.0
         dhcp_start: 192.168.122.10

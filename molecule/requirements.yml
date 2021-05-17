@@ -19,7 +19,7 @@ roles:
   - name: tcharl.ansible_manage_lvm
     source: https://galaxy.ansible.com
     path: ../community
-  - name: tcharl.hostname
+  - name: tcharl.ansible_hostname
     source: https://galaxy.ansible.com
     path: ../community
   - name: tcharl.ansible_nameserver

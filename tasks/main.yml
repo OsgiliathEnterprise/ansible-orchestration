@@ -2,6 +2,7 @@
 # tasks file for ansible-orchestration
 - name: ansible-orchestration | gather facts on newly created machines
   setup:
+  delegate_facts: true
   delegate_to: "{{ groups['kube_master'][0] }}"
   register: masterfacts
 
@@ -10,24 +11,69 @@
     var: masterfacts
     verbosity: 3
 
-- name: ansible-orchestration | include firewalld role
+- name: ansible-orchestration | include firewalld role for masters
   import_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
-      - name: public
+      - name: "{{ kube_firewall_zone }}"
+        enabled_service:
+          - service: "ssh"
+          - service: "http"
+          - service: "https"
         enabled_ports:
           - port: 6443
             protocol: tcp
+          - port: 2379
+            protocol: tcp
+          - port: 2380
+            protocol: tcp
           - port: 10250
             protocol: tcp
+          - port: 10251
+            protocol: tcp
+          - port: 10252
+            protocol: tcp
+  when: kube_masters_group in group_names
+
+- name: ansible-orchestration | include firewalld role for nodes
+  import_role:
+    name: tcharl.ansible_routing
+  vars:
+    firewalld_zones:
+      - name: "{{ kube_firewall_zone }}"
+        enabled_service:
+          - service: "ssh"
+        enabled_ports:
+          - port: 10250
+            protocol: tcp
+        enabled_port_ranges:
+          - port_range: "30000-32767"
+            protocol: tcp
+  when: kube_nodes_group in group_names
+
+- name: ansible-orchestration | Install needed package
+  package:
+    name:
+     - iproute-tc
+    state: present
+  become: true
+
+- name: ansible-orchestration | remove unwanted packages
+  package:
+    name:
+     - zram-generator-defaults
+    state: absent
+  become: true
 
 - name: ansible-orchestration | include kubernetes role
   include_role:
     name: geerlingguy.kubernetes
   vars:
     ansible_become: true
-    kubernetes_version_kubeadm: "{{ kube_version_kubeadm }}"
-    kubernetes_apiserver_advertise_address: >
-      {{ masterfacts.ansible_facts.ansible_default_ipv4.address|
-      default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}
+    kubernetes_apiserver_advertise_address: "{{ masterfacts.ansible_facts.ansible_default_ipv4.address | ansible.netcommon.ipaddr | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    kubernetes_pod_network:
+      cni: 'flannel'
+      cidr: "{{ kube_cidr }}"
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,Swap"
+    kubernetes_kubelet_extra_args: "--fail-swap-on=false"

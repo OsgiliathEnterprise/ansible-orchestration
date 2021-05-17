@@ -1,4 +1,7 @@
 ---
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: false
-kube_version_kubeadm: 1.18.3
+kube_firewall_zone: 'public'
+kube_masters_group: kube_master
+kube_nodes_group: kube_node
+kube_cidr: "10.244.0.0/16"
