@@ -1,0 +1,112 @@
+---
+
+- name: ansible-orchestration | ipa-kubernetes-ca | check if kube generic ca exists
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa ca-find | grep -c ': kubernetes-ca'
+  register: kubernetes_ca_exists
+  no_log: True
+  failed_when: False
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | create ip lightweight ca
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin  > /dev/null
+    ipa ca-add kubernetes-ca --subject "CN=kubernetes-ca,O={{ company_domain | upper }}"
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | create kube admin ca access list category
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa caacl-add user-kubernetes-kube-admins
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | add kube-ca to kube admin category
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin
+    ipa caacl-add-ca user-kubernetes-kube-admins --ca kubernetes-ca
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | create ipa administrators
+  freeipa.ansible_freeipa.ipagroup:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name: "kubernetes-administrators"
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: True
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+
+- name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa caacl-add-user user-kubernetes-kube-admins --group kubernetes-administrators
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | get the ipa default ca profile
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa certprofile-show --out /tmp/ipa_default_ca_profile.cfg caIPAserviceCert
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | replace the ipa ca default profile id with the kubeadmin one
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_default_ca_profile.cfg
+    regexp: '^profileId='
+    line: profileId=kubeAdministrators
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | set the profile visible
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_default_ca_profile.cfg
+    regexp: '^visible='
+    line: visible=true
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | import the according kubernetes admin profile
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa certprofile-import kubeAdministrators --file /tmp/ipa_default_ca_profile.cfg --desc "Kubernetes administration certificates" --store TRUE
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | peer ca kubeAdm profile to ca
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa caacl-add-profile user-kubernetes-kube-admins --certprofile kubeAdministrators
+  when:
+   - not kubernetes_ca_exists.stdout == '1'
+  no_log: True
+  changed_when: False
+  become: true

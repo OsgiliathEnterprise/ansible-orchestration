@@ -4,6 +4,6 @@
   systemd:
     state: restarted
     daemon_reload: yes
-    name: kube
+    name: kubelet
   become: true
   listen: ansible-orchestration | refresh kube

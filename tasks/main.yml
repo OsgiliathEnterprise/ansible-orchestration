@@ -1,5 +1,10 @@
 ---
 # tasks file for ansible-orchestration
+
+- name: ansible-orchestration | role dependencies
+  ansible.builtin.import_tasks: deps.yml
+  when: standalone_role
+
 - name: ansible-orchestration | gather facts on newly created machines
   setup:
   delegate_facts: true
@@ -12,7 +17,7 @@
     verbosity: 3
 
 - name: ansible-orchestration | include firewalld role for masters
-  import_role:
+  include_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
@@ -37,7 +42,7 @@
   when: kube_masters_group in group_names
 
 - name: ansible-orchestration | include firewalld role for nodes
-  import_role:
+  include_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
@@ -66,14 +71,95 @@
     state: absent
   become: true
 
+# TODO continue the exercise
+# - name: ansible-orchestration | Check that the kube ca exists
+#  stat:
+#    path: "{{ kubernetes_certificates_path }}ca.crt"
+#  when:
+#    - kube_masters_group in group_names
+#  register: kube_ca_result
+
+#- name: ansible-orchestration | delegate kubernetes ca creation to IPA
+#  include_tasks: ipa-kubernetes-ca.yml
+#  when:
+#   - kube_masters_group in group_names
+#   - not kube_ca_result.stat.exists
+
+- name: ansible-orchestration | create kubernetes directory
+  file:
+    path: "/etc/kubernetes"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+  become: True
+
+- name: ansible-orchestration | create kubernetes pki directory
+  file:
+    path: "{{ kubernetes_certificates_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+  become: True
+
+#- name: ansible-orchestration | download ca
+#  shell: |
+#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+#    ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt
+#  when:
+#   - not kube_ca_result.stat.exists
+#   - kube_masters_group in group_names
+#  no_log: True
+#  changed_when: False
+#  become: true
+
+- name: ansible-orchestration | get current hostname
+  command: "hostname"
+  register: machine_hostname
+  changed_when: false
+
+#- name: ansible-orchestration | create kubernetes ca issued certs
+#  include_tasks: kubernetes-ca-issued-certs.yml
+#  when: kube_masters_group in group_names
+
+- name: ansible-orchestration | compute kubernetes node group
+  debug:
+    msg: "{{ 'master' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
+  register: kube_node_group
+  when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
+
+- name: ansible-orchestration | ensure swap disabled
+  command: "swapoff --all"
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | compute ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: targethostfacts_ip
+
 - name: ansible-orchestration | include kubernetes role
   include_role:
     name: geerlingguy.kubernetes
+  when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
   vars:
     ansible_become: true
-    kubernetes_apiserver_advertise_address: "{{ masterfacts.ansible_facts.ansible_default_ipv4.address | ansible.netcommon.ipaddr | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    kubernetes_apiserver_advertise_address: "{{ targethostfacts_ip.msg | ansible.netcommon.ipaddr }}"
     kubernetes_pod_network:
       cni: 'flannel'
       cidr: "{{ kube_cidr }}"
-    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,Swap"
-    kubernetes_kubelet_extra_args: "--fail-swap-on=false"
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
+    kubernetes_role: "{{ kube_node_group.msg }}"
+    kubernetes_config_cluster_configuration:
+      networking:
+        podSubnet: "{{ kubernetes_pod_network.cidr }}"
+      kubernetesVersion: "{{ kubernetes_version_kubeadm }}"
+      apiServer:
+        certSANs: "{{ kube_alt_names | default(omit) }}"
+        extraArgs:
+          authorization-mode: Node,RBAC
+        timeoutForControlPlane: 4m0s
+
+- name: ansible-orchestration | prerequisites
+  ansible.builtin.import_tasks: admin-user.yml

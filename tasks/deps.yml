@@ -1,0 +1,40 @@
+---
+- name: ansible-orchestration | deps | hacking var
+  debug:
+    var: standalone_role
+  register: is_standalone
+
+- name: ansible-orchestration | deps | import containerization role
+  include_role:
+    name: tcharl.ansible_containerization
+  vars:
+    ansible_become: True
+    standalone_role: "{{ is_standalone.standalone_role }}"
+    docker_install_compose: false
+
+- name: ansible-orchestration | deps | import swap role
+  include_role:
+    name: geerlingguy.swap
+  vars:
+    swap_file_state: absent
+    ansible_become: True
+
+- name: ansible-orchestration | deps | import core deps role
+  import_role:
+    name: robertdebock.core_dependencies
+  become: True
+
+- name: ansible-orchestration | deps | import bootstrap role
+  import_role:
+    name: robertdebock.bootstrap
+  become: True
+
+- name: ansible-orchestration | deps | import securehost role
+  import_role:
+    name: tcharl.ansible_securehost
+  become: True
+
+- name: ansible-orchestration | deps | import nameserver role
+  import_role:
+    name: tcharl.ansible_nameserver
+  become: True

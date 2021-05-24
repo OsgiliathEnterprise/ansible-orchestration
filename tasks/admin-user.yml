@@ -1,0 +1,121 @@
+---
+- name: ansible-orchestration | admin-user | install required libraries
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - "python3-pyOpenSSL"
+    - "python3-cryptography"
+  become: true
+
+- name: ansible-orchestration | admin-user | create a kube credential folder
+  ansible.builtin.file:
+    state: directory
+    dest: "{{ kube_credential_folder }}"
+    mode: "0755"
+    owner: "root"
+    group: "root"
+  when:
+   - kube_masters_group in group_names
+  become: true
+
+- name: ansible-orchestration | admin-user | create a kube credential key and store into the first datastore mountpoint
+  community.crypto.openssl_privatekey:
+    path: "{{ kube_credential_folder }}/kubeadm.pem"
+  when:
+   - kube_masters_group in group_names
+   - not kube_credential_key is defined
+  become: true
+
+- name: ansible-orchestration | admin-user | create a kube credential key and store into the first datastore mountpoint
+  ansible.builtin.copy:
+    dest: "{{ kube_credential_folder }}/kubeadm.pem"
+    content: "{{ kube_credential_key }}"
+    user: "root"
+    group: "root"
+    mode: 0600
+  when:
+   - kube_masters_group in group_names
+   - kube_credential_key is defined
+  become: true
+
+- name: ansible-orchestration | admin-user | Generate an OpenSSL Certificate Signing Request with Subject information
+  community.crypto.openssl_csr:
+    path: "{{ kube_credential_folder }}/kubeadm.csr"
+    privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
+    country_name: "FR"
+    organization_name: "clusterAdministrators"
+    email_address: "{{ kube_credential_email_address }}"
+    common_name: "kubeClusteradm"
+#    subject_alt_name: "{{ (['DNS:'] | product(kube_alt_names) | map('join') | list) | default([]) | flatten }}"
+  when:
+   - kube_masters_group in group_names
+  become: true
+
+- name: ansible-orchestration | admin-user | Generate an OpenSSL certificate signed with kube CA certificate
+  community.crypto.x509_certificate:
+    path: "{{ kube_credential_folder }}/kubeadm.crt"
+    csr_path: "{{ kube_credential_folder }}/kubeadm.csr"
+    ownca_path: "{{ kubernetes_certificates_path }}ca.crt"
+    ownca_privatekey_path: "{{ kubernetes_certificates_path }}ca.key"
+    provider: ownca
+  when:
+   - kube_masters_group in group_names
+  become: true
+
+- name: ansible-orchestration | admin-user | create admin account
+  ansible.builtin.copy:
+    src: clusteradministrators.yml
+    dest: "/tmp/clusteradministrators.yml"
+    owner: root
+    group: root
+    mode: 0640
+  become: true
+
+- name: ansible-orchestration | admin-user | create kubernetes user
+  ansible.builtin.command: "kubectl apply -f /tmp/clusteradministrators.yml"
+  when:
+   - kube_masters_group in group_names
+  failed_when: false
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | admin-user | create admin account
+  ansible.builtin.copy:
+    src: cluster-administrators-crb.yml
+    dest: "/tmp/cluster-administrators-crb.yml"
+    owner: root
+    group: root
+    mode: 0640
+  become: true
+
+- name: ansible-orchestration | admin-user | create kubernetes user
+  ansible.builtin.command: "kubectl apply -f /tmp/cluster-administrators-crb.yml"
+  when:
+   - kube_masters_group in group_names
+  failed_when: false
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | admin-user | configure kubernetes with credentials
+  ansible.builtin.command: "kubectl config set-credentials kubeadm --client-key={{ kube_credential_folder }}/kubeadm.pem --client-certificate={{ kube_credential_folder }}/kubeadm.crt"
+  when:
+   - kube_masters_group in group_names
+  failed_when: false
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | admin-user | cat kubernetes admin certificates
+  command: "cat {{ kube_credential_folder }}/kubeadm.crt"
+  register: key
+  changed_when: False
+  when:
+   - kube_masters_group in group_names
+  become: true
+
+- name: ansible-orchestration | admin-user | cat kubernetes admin certificates
+  debug:
+    var: key.stdout
+  when:
+   - kube_masters_group in group_names
+  become: true

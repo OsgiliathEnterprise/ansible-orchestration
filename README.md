@@ -7,18 +7,36 @@ Orchestration
 * Chat: [![Join the chat at https://gitter.im/OsgiliathEnterprise/platform](https://badges.gitter.im/OsgiliathEnterprise/platform.svg)](https://gitter.im/OsgiliathEnterprise/platform?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 
-Combines LVM, Docker, Libvirt and geerlinguy.kubernetes roles to create some VMs and configure kubernetes over it 
+Combines LVM, Docker, Libvirt and geerlinguy.kubernetes roles to configure kubernetes over with good security (firewall rules).
+
+Basically, it will configure X master nodes and Y workers.
+
+This role will also generate a Kubernetes cluster admin client certificate keypair  available on the master's '/home/kubecreds' machine folder 
 
 Requirements
 ------------
-
-
 
 Role Variables
 --------------
 
 As an example, see the [Molecule test vars](./molecule/default/converge.yml)
 
+Example of attributes for a node part of the kube_master role
+```
+kubernetes_allow_pods_on_master: False
+hostname: "master.{{ company_domain }}"
+hostname_reboot: false
+kube_firewall_zone: 'public'
+kube_alt_names:
+  - "kubeadm.osgiliath.net"
+```
+
+Example of attributes for a node part of the kube_node role
+```
+hostname: "node.{{ company_domain }}
+hostname_reboot: false
+kube_firewall_zone: 'public'
+```
 Dependencies
 ------------
 
@@ -29,9 +47,14 @@ Example Playbook
 
 Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
 
-    - hosts: servers
+    - hosts:
+       - kube_master
       roles:
-         - { role: tcharl.ansible-orchestration, x: 42 }
+         - { role: tcharl.ansible-orchestration }
+    - hosts:
+       - kube_node
+      roles:
+         - { role: tcharl.ansible-orchestration }
 
 License
 -------

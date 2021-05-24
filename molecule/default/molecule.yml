@@ -4,39 +4,46 @@ dependency:
   options:
     role-file: molecule/requirements.yml
     roles-path: ../community
+    requirements-file: requirements-collections.yml
+    collections-path: ../community-collections
 driver:
   name: vagrant
   provider:
     name: virtualbox
-lint: yamllint . && flake8 && ansible-lint --exclude=meta
+lint: yamllint . && flake8 && ansible-lint --exclude=meta,.cache
 platforms:
-  - name: Fedora-Molecule-Orchestration-VB
-    box: fedora/33-cloud-base
+  - name: master.osgiliath.test
+    box: tcharl/fedora-33-cgroupv1
     provider_options:
-      cpus: 6
-      memory: 8192
-    provider_raw_config_args:
-      - "customize ['modifyvm', :id, '--nested-hw-virt', 'on']"
-      - "customize ['storagectl', :id, '--name', 'IDE', '--hostiocache', 'on']"
+      cpus: 2
+      memory: 2048
     interfaces:
       - auto_config: true
         network_name: private_network
         type: dhcp
-      - network_name: forwarded_port
-        guest: 22022
-        host: 22022
-      - network_name: forwarded_port
-        guest: 23022
-        host: 23022
+    groups:
+      - kube_master
+    provider_raw_config_args:
+      - "customize ['storagectl', :id, '--name', 'IDE Controller', '--hostiocache', 'on']"
     instance_raw_config_args:
       - "cache.enable :dnf"
       - "cache.auto_detect = false"
-    provider_override_args:
-      - "persistent_storage.enabled = true"
-      - "persistent_storage.location = 'molecule-orchestration.vdi'"
-      - "persistent_storage.size = 15000"
-      - "persistent_storage.mount = false"
-      - "persistent_storage.diskdevice = '/dev/sdb'"
+  - name: node1.osgiliath.test
+    box: tcharl/fedora-33-cgroupv1
+    provider_options:
+      cpus: 2
+      memory: 2048
+    groups:
+      - kube_node
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        type: dhcp
+    provider_raw_config_args:
+      - "customize ['storagectl', :id, '--name', 'IDE Controller', '--hostiocache', 'on']"
+    instance_raw_config_args:
+      - "cache.enable :dnf"
+      - "cache.auto_detect = false"
 
 provisioner:
   name: ansible
@@ -49,23 +56,26 @@ provisioner:
 #      pipelining: true
 #      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   env:
-    ANSIBLE_ROLES_PATH: ../../..:../../../community
-  inventory:
-    group_vars:
-      kube_master:
-        kubernetes_role: master
-        ns_hostname: "master.osgiliath.net"
-        kubernetes_pod_network:
-          cni: 'flannel'
-          cidr: '10.128.0.0/16'
-        hostname_reboot: false
-      kube_node:
-        kubernetes_role: node
-        ns_hostname: "node.osgiliath.net"
-        hostname_reboot: false
+    ANSIBLE_ROLES_PATH: ${ANSIBLE_ROLES_PATH}:../../../community
 verifier:
   name: testinfra
   env:
     PYTHONWARNINGS: "ignore:.*U.*mode is deprecated:DeprecationWarning"
   options:
     v: 1
+scenario:
+  name: default
+  test_sequence:
+    - dependency
+    - lint
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+ #   - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy

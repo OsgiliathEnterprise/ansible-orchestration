@@ -37,3 +37,9 @@ roles:
   - name: tcharl.ansible_routing
     source: https://galaxy.ansible.com
     path: ../community
+  - name: robertdebock.fail2ban
+    source: https://galaxy.ansible.com
+    path: ../community
+  - name: robertdebock.epel
+    source: https://galaxy.ansible.com
+    path: ../community
