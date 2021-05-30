@@ -1,15 +1,9 @@
 ---
-- name: ansible-orchestration | deps | hacking var
-  debug:
-    var: standalone_role
-  register: is_standalone
-
 - name: ansible-orchestration | deps | import containerization role
   include_role:
     name: tcharl.ansible_containerization
   vars:
     ansible_become: True
-    standalone_role: "{{ is_standalone.standalone_role }}"
     docker_install_compose: false
 
 - name: ansible-orchestration | deps | import swap role
