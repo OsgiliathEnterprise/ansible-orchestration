@@ -6,7 +6,6 @@
       include_role:
         name: "ansible-orchestration"
       vars:
-        preferred_nic: "eth1"
         kubernetes_allow_pods_on_master: False
         hostname: "master.osgiliath.test"
         hostname_reboot: false
@@ -22,7 +21,6 @@
       include_role:
         name: "ansible-orchestration"
       vars:
-        preferred_nic: "eth1"
         hostname: "node1.osgiliath.test"
         hostname_reboot: false
         kube_firewall_zone: 'public'

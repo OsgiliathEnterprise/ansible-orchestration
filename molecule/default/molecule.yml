@@ -2,7 +2,7 @@
 dependency:
   name: galaxy
   options:
-    role-file: molecule/requirements.yml
+    role-file: requirements.yml
     roles-path: ../community
     requirements-file: requirements-collections.yml
     collections-path: ../community-collections
@@ -23,8 +23,6 @@ platforms:
         type: dhcp
     groups:
       - kube_master
-    provider_raw_config_args:
-      - "customize ['storagectl', :id, '--name', 'IDE Controller', '--hostiocache', 'on']"
     instance_raw_config_args:
       - "cache.enable :dnf"
       - "cache.auto_detect = false"
@@ -39,8 +37,6 @@ platforms:
       - auto_config: true
         network_name: private_network
         type: dhcp
-    provider_raw_config_args:
-      - "customize ['storagectl', :id, '--name', 'IDE Controller', '--hostiocache', 'on']"
     instance_raw_config_args:
       - "cache.enable :dnf"
       - "cache.auto_detect = false"
@@ -57,6 +53,7 @@ provisioner:
 #      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   env:
     ANSIBLE_ROLES_PATH: ${ANSIBLE_ROLES_PATH}:../../../community
+    ANSIBLE_COLLECTIONS_PATH: ${ANSIBLE_COLLECTIONS_PATH}:../community-collections
 verifier:
   name: testinfra
   env:

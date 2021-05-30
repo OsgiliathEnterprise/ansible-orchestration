@@ -49,9 +49,9 @@ jobs:
           vagrant plugin install vagrant-libvirt
       - name: pip install packages
         run: |
-          sudo pip3 install wheel setuptools-rust netaddr
-          sudo pip3 install pyopenssl python-vagrant yamllint testinfra flake8 ansible ansible-lint molecule molecule-vagrant
-          sudo pip3 install -U PyYAML
+          pip3 install wheel setuptools-rust netaddr
+          pip3 install pyopenssl python-vagrant yamllint pytest-testinfra flake8 ansible ansible-lint molecule molecule-vagrant
+          pip3 install -U PyYAML
 #      - name: Test KVM conditions fails
 #        run: |
 #          sudo kvm-ok
@@ -68,5 +68,5 @@ jobs:
       - uses: actions/checkout@v2
       - name: install prereq
         run: |
-          ansible-galaxy collection install -r requirements.yml
+          ansible-galaxy collection install -r requirements-collections.yml
           ansible-galaxy role install -r requirements.yml

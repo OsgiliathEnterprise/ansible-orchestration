@@ -24,9 +24,7 @@ platforms:
         type: dhcp
     groups:
       - kube_master
-    provider_raw_config_args:
-      - "storage :file, :size => '1G', :device => 'vdb'"
-  - name: node.osgiliath.test
+  - name: node1.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
     provider_options:
       driver: '"kvm"'
@@ -38,8 +36,6 @@ platforms:
         type: dhcp
     groups:
       - kube_node
-    provider_raw_config_args:
-      - "storage :file, :size => '1G', :device => 'vdb'"
 provisioner:
   name: ansible
 #  config_options:
@@ -50,6 +46,7 @@ provisioner:
 #      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
   env:
     ANSIBLE_ROLES_PATH: ${ANSIBLE_ROLES_PATH}:../../../community
+    ANSIBLE_COLLECTIONS_PATH: ${ANSIBLE_COLLECTIONS_PATH}:../community-collections
 verifier:
   name: testinfra
   env:
