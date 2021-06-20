@@ -1,0 +1,24 @@
+---
+
+- name: ansible-orchestration | ipa-master | configure http service
+  freeipa.ansible_freeipa.ipaservice:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name: "{{ item }}"
+    host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+    allow_retrieve_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+    allow_create_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}" # TODO create kubernetes master group
+    skip_host_check: True
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  loop:
+   - "HTTP/{{ hostname | default(kube_machine_hostname.stdout) }}"
+
+- name: ansible-orchestration | ipa-master | set service to be managed by current host
+  freeipa.ansible_freeipa.ipahost:
+    ipaadmin_password: "{{ company_realm_password }}"
+    hosts:
+     - name: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+       managedby_host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+    action: member
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"

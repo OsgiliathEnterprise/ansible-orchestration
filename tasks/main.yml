@@ -2,8 +2,11 @@
 # tasks file for ansible-orchestration
 
 - name: ansible-orchestration | role dependencies
-  ansible.builtin.import_tasks: deps.yml
+  ansible.builtin.include_tasks: deps.yml
   when: standalone_role
+
+- name: ansible-orchestration | role dependencies
+  ansible.builtin.include_tasks: prereq.yml
 
 - name: ansible-orchestration | gather facts on newly created machines
   setup:
@@ -57,33 +60,15 @@
             protocol: tcp
   when: kube_nodes_group in group_names
 
-- name: ansible-orchestration | Install needed package
-  package:
-    name:
-     - iproute-tc
-    state: present
-  become: true
+- name: ansible-orchestration | delegate kubernetes ca creation to IPA
+  include_tasks: kube-destroy.yml
+  when:
+   - reset_kube
 
-- name: ansible-orchestration | remove unwanted packages
-  package:
-    name:
-     - zram-generator-defaults
-    state: absent
-  become: true
-
-# TODO continue the exercise
-# - name: ansible-orchestration | Check that the kube ca exists
-#  stat:
-#    path: "{{ kubernetes_certificates_path }}ca.crt"
-#  when:
-#    - kube_masters_group in group_names
-#  register: kube_ca_result
-
-#- name: ansible-orchestration | delegate kubernetes ca creation to IPA
-#  include_tasks: ipa-kubernetes-ca.yml
+# - name: ansible-orchestration | delegate kubernetes ca creation to IPA
+#  include_tasks: ipa-certs.yml
 #  when:
 #   - kube_masters_group in group_names
-#   - not kube_ca_result.stat.exists
 
 - name: ansible-orchestration | create kubernetes directory
   file:
@@ -93,35 +78,6 @@
     group: root
     mode: 0755
   become: True
-
-- name: ansible-orchestration | create kubernetes pki directory
-  file:
-    path: "{{ kubernetes_certificates_path }}"
-    state: directory
-    owner: root
-    group: root
-    mode: 0755
-  become: True
-
-#- name: ansible-orchestration | download ca
-#  shell: |
-#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-#    ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt
-#  when:
-#   - not kube_ca_result.stat.exists
-#   - kube_masters_group in group_names
-#  no_log: True
-#  changed_when: False
-#  become: true
-
-- name: ansible-orchestration | get current hostname
-  command: "hostname"
-  register: machine_hostname
-  changed_when: false
-
-#- name: ansible-orchestration | create kubernetes ca issued certs
-#  include_tasks: kubernetes-ca-issued-certs.yml
-#  when: kube_masters_group in group_names
 
 - name: ansible-orchestration | compute kubernetes node group
   debug:
@@ -156,10 +112,12 @@
         podSubnet: "{{ kubernetes_pod_network.cidr }}"
       kubernetesVersion: "{{ kubernetes_version_kubeadm }}"
       apiServer:
-        certSANs: "{{ kube_alt_names | default(omit) }}"
+        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) }}"
         extraArgs:
           authorization-mode: Node,RBAC
         timeoutForControlPlane: 4m0s
+    kubernetes_config_kubelet_configuration:
+      cgroupDriver: systemd
 
-- name: ansible-orchestration | prerequisites
+- name: ansible-orchestration | create admin user
   ansible.builtin.import_tasks: admin-user.yml

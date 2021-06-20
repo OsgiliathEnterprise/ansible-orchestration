@@ -1,0 +1,54 @@
+---
+
+- name: ansible-orchestration | ipa-certs | create kubernetes pki directory
+  file:
+    path: "{{ kubernetes_certificates_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+  become: True
+
+- name: ansible-orchestration | ipa-certs | Check that the kube ca exists
+  stat:
+    path: "{{ kubernetes_certificates_path }}ca.crt"
+  register: kube_ca_result
+
+- name: ansible-orchestration | ipa-certs | delegate kubernetes ca creation to IPA
+  include_tasks: ipa-kubernetes-ca.yml
+  when:
+   - not kube_ca_result.stat.exists
+
+- name: ansible-orchestration | ipa-certs | download ca
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt
+  when:
+   - not kube_ca_result.stat.exists
+  no_log: "{{ secure_logs }}"
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-certs | create principals for master
+  include_tasks: ipa-master.yml
+
+- name: ansible-orchestration | ipa-certs | Check that the kube ca exists
+  stat:
+    path: "{{ kubernetes_certificates_path }}apiserver.crt"
+  register: kube_apiserver_result
+
+- name: ansible-orchestration | ipa-certs | create apiserver cert
+  include_tasks: ipa-api-server.yml
+  when:
+   - not kube_apiserver_result.stat.exists
+
+- name: ansible-orchestration | ipa-certs | Check kubelet cert exists
+  stat:
+    path: "{{ kubernetes_certificates_path }}kube-apiserver-kubelet-client.crt"
+  register: kube_apiserver_kubelet_client_result
+
+- name: ansible-orchestration | ipa-certs | create kubelet client certs
+  include_tasks: kube-apiserver-kubelet-client.yml
+  when:
+   - not kube_apiserver_kubelet_client_result.stat.exists
+# TODO continue the exercize

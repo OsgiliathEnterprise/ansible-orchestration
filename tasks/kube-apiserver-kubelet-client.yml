@@ -1,0 +1,80 @@
+---
+
+- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client certs
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
+  become: true
+
+- name: ansible-orchestration | kube-apiserver-kubelet-client | Check that kube-apiserver-kubelet-client certs exists
+  stat:
+    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
+  register: apiserver_kubelet_client_result
+
+- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client csr
+  community.crypto.openssl_csr:
+    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
+    privatekey_path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "system:masters"
+    email_address: "{{ kube_credential_email_address }}"
+    common_name: "{{ hostname | default(kube_machine_hostname.stdout) }}"# "api.kubernetes.{{ company_domain }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - clientAuth
+  when: not apiserver_kubelet_client_result.stat.exists
+  become: true
+
+#- name: ansible-orchestration | ipa-api-server | configure http service
+#  freeipa.ansible_freeipa.ipaservice:
+#    ipaadmin_password: "{{ company_realm_password }}"
+#    name: "{{ item }}"
+#    host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+#    allow_create_keytab_group:
+#      - admins
+#    allow_retrieve_keytab_group:
+#      - admins
+#    allow_retrieve_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+#    allow_create_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}" # TODO create kubernetes master group
+#    skip_host_check: True
+#  delegate_to: "{{ groups[idm_group][0] }}"
+#  no_log: "{{ secure_logs }}"
+#  loop:
+#   - "HTTP/api.kubernetes.{{ company_domain }}"
+
+#- name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
+#  freeipa.ansible_freeipa.ipagroup:
+#    ipaadmin_password: "{{ company_realm_password }}"
+#    name: "kubernetes-administrators"
+#    service: "HTTP/api.kubernetes.{{ company_domain }}"
+#  no_log: "{{ secure_logs }}"
+#  delegate_to: "{{ groups[idm_group][0] }}"
+#  when:
+#   - not ipa_group_kubeadm_exists.stdout == '1'
+
+#- name: ansible-orchestration | ipa-api-server | create dummy host for default SAN
+#  shell: >
+#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
+#    ipa add-host api.kubernetes.{{ company_domain }} &&
+#    ipa host-add-managedby api.kubernetes.{{ company_domain }} --hosts={{ hostname | default(kube_machine_hostname.stdout) }}
+#  failed_when: False
+#  changed_when: False
+#  delegate_to: "{{ groups[idm_group][0] }}"
+#  no_log: "{{ secure_logs }}"
+
+- name: ansible-orchestration | kube-apiserver-kubelet-client | Check kube-apiserver-kubelet-client existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
+  register: orchestration_apiserver_kubelet_client
+  become: true
+
+- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
+    ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ hostname | default(kube_machine_hostname.stdout) }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr
+  when:
+   - not orchestration_apiserver_kubelet_client.stat.exists
+  no_log: "{{ secure_logs }}"
+  changed_when: False
+  become: true
