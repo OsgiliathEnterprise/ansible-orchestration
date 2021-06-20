@@ -43,3 +43,6 @@ roles:
   - name: robertdebock.epel
     source: https://galaxy.ansible.com
     path: ../community
+  - name: tcharl.ansible_securehost
+    source: https://galaxy.ansible.com
+    path: ../community

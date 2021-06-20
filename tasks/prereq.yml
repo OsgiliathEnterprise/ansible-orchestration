@@ -1,0 +1,39 @@
+---
+
+- name: ansible-orchestration | deps | Install needed package
+  package:
+    name:
+     - iproute-tc
+    state: present
+  become: true
+
+- name: ansible-orchestration | deps | remove unwanted packages
+  package:
+    name:
+     - zram-generator-defaults
+    state: absent
+  become: true
+
+- name: ansible-orchestration | deps | install required libraries
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - "python3-pyOpenSSL"
+    - "python3-cryptography"
+  become: true
+
+- name: ansible-orchestration | deps | retreive current machine ip
+  setup:
+  register: current_host_facts
+  delegate_facts: true
+
+- name: ansible-orchestration | deps | compute ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: current_host_ip
+
+- name: ansible-orchestration | ipa-api-server | get current hostname
+  command: "hostname"
+  register: kube_machine_hostname
+  changed_when: false

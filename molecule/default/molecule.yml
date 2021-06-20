@@ -10,7 +10,7 @@ driver:
   name: vagrant
   provider:
     name: virtualbox
-lint: yamllint . && flake8 && ansible-lint --exclude=meta,.cache
+lint: yamllint . && flake8 && ansible-lint
 platforms:
   - name: master.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
@@ -23,6 +23,7 @@ platforms:
         type: dhcp
     groups:
       - kube_master
+      - ipaclients
     instance_raw_config_args:
       - "cache.enable :dnf"
       - "cache.auto_detect = false"
@@ -33,6 +34,7 @@ platforms:
       memory: 2048
     groups:
       - kube_node
+      - ipaservers
     interfaces:
       - auto_config: true
         network_name: private_network

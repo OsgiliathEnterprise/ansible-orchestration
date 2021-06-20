@@ -1,0 +1,8 @@
+---
+- name: prepare IPA
+  hosts: all
+  roles:
+    - role: tcharl.ansible_securehost
+  vars:
+    preferred_nic: "eth1"
+    company_domain: osgiliath.test
