@@ -3,46 +3,48 @@ roles:
   # Install a role from Ansible Galaxy.
   - name: geerlingguy.kubernetes
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: geerlingguy.swap
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: geerlingguy.docker
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_containerization
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_volumes
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_manage_lvm
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_hostname
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_nameserver
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: robertdebock.bootstrap
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: robertdebock.core_dependencies
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: robertdebock.reboot
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_routing
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: robertdebock.fail2ban
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: robertdebock.epel
     source: https://galaxy.ansible.com
-    path: ../community
+
   - name: tcharl.ansible_securehost
     source: https://galaxy.ansible.com
-    path: ../community
+
+  - name: geerlingguy.ntp
+    source: https://galaxy.ansible.com
