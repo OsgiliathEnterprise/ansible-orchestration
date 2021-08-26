@@ -37,7 +37,8 @@ install:
   - pip install molecule molecule-vagrant==0.6.1 jmespath netaddr
   - sudo chmod o+rwx /var/run/libvirt/libvirt-sock
 
-script: travis_wait 180 molecule test --scenario-name kvm
+script:
+  - travis_wait 180 molecule test --scenario-name kvm
 branches:
   only:
     - master
