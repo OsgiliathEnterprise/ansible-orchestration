@@ -2,7 +2,6 @@
 - name: Converge master
   hosts:
    - kube_master
-   - ipaclients
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
@@ -24,7 +23,6 @@
 - name: Converge node
   hosts:
    - kube_node
-   - ipaservers
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
