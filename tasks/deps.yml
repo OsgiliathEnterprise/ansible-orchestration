@@ -1,10 +1,8 @@
 ---
 - name: ansible-orchestration | deps | import containerization role
-  include_role:
+  import_role:
     name: tcharl.ansible_containerization
-  vars:
-    ansible_become: True
-    docker_install_compose: false
+  become: Yes
 
 - name: ansible-orchestration | deps | import swap role
   include_role:
@@ -29,6 +27,7 @@
   become: True
 
 - name: ansible-orchestration | deps | import nameserver role
-  import_role:
+  include_role:
     name: tcharl.ansible_nameserver
-  become: True
+  vars:
+    ansible_become: Yes

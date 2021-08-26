@@ -10,7 +10,11 @@ driver:
   name: vagrant
   provider:
     name: virtualbox
-lint: yamllint . && flake8 && ansible-lint --exclude=meta,.cache
+lint: |
+  set -e
+  yamllint .
+  flake8
+  ANSIBLE_ROLES_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community ANSIBLE_COLLECTIONS_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community-collections ansible-lint
 platforms:
   - name: master.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
@@ -23,9 +27,7 @@ platforms:
         type: dhcp
     groups:
       - kube_master
-    instance_raw_config_args:
-      - "cache.enable :dnf"
-      - "cache.auto_detect = false"
+      - ipaclients
   - name: node1.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
     provider_options:
@@ -33,13 +35,11 @@ platforms:
       memory: 2048
     groups:
       - kube_node
+      - ipaservers
     interfaces:
       - auto_config: true
         network_name: private_network
         type: dhcp
-    instance_raw_config_args:
-      - "cache.enable :dnf"
-      - "cache.auto_detect = false"
 
 provisioner:
   name: ansible

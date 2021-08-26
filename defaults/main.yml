@@ -1,10 +1,11 @@
 ---
 # defaults file for ansible-orchestration
-kubernetes_allow_pods_on_master: false
+kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'public'
 kube_masters_group: kube_master
 kube_nodes_group: kube_node
 kube_cidr: "10.244.0.0/16"
+idm_group: 'ipaservers' # do not change: convention from the ipa roles
 
 kube_credential_folder: "/home/kubecreds"
 kube_credential_country_name: "FR"
@@ -12,4 +13,7 @@ kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
 kube_credential_cn: "Kubernetes administration credential"
 kubernetes_certificates_path: "/etc/kubernetes/pki/"
-standalone_role: True
+standalone_role: Yes
+secure_logs: Yes
+reset_kube: False
+iPA: Yes

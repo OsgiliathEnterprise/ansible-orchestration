@@ -1,0 +1,63 @@
+---
+
+- name: ansible-orchestration | kube-destroy | drain nodes
+  command: "kubectl drain {{ registeredhost }} --delete-local-data --force --ignore-daemonsets"
+  become: Yes
+  failed_when: false
+  loop: "{{ groups[kube_nodes_group] | list }}"
+  loop_control:
+    loop_var: registeredhost
+  when:
+    - kube_masters_group in group_names
+
+- name: ansible-orchestration | kube-destroy | delete nodes at master level
+  command: "kubectl delete node {{ registeredhost }}"
+  become: Yes
+  failed_when: false
+  loop: "{{ groups[kube_nodes_group] | list }}"
+  loop_control:
+    loop_var: registeredhost
+  when:
+    - kube_masters_group in group_names
+
+- name: ansible-orchestration | kube-destroy | reset kubeadm
+  command: "kubeadm reset -f"
+  become: Yes
+  failed_when: false
+  when:
+    - kube_masters_group in group_names
+
+- name: ansible-orchestration | kube-destroy | remove unwanted packages
+  package:
+    name:
+     - kubeadm
+     - kubectl
+     - kubelet
+     - kubernetes-cni
+     - kubernetes-client
+     - kubernetes-ansible
+     - kubernetes-node
+     - kubernetes-master
+    state: absent
+  become: true
+
+- name: ansible-orchestration | kube-destroy | remove configuration folder
+  file:
+    path: /etc/kubernetes
+    state: absent
+  become: Yes
+  failed_when: false
+
+- name: ansible-orchestration | kube-destroy | remove etcd configuration
+  file:
+    path: /var/lib/etcd
+    state: absent
+  become: Yes
+  failed_when: false
+
+- name: ansible-orchestration | kube-destroy | remove kubelet configuration
+  file:
+    path: /var/lib/kubelet
+    state: absent
+  become: Yes
+  failed_when: false

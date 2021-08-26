@@ -4,8 +4,9 @@
   shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa ca-find | grep -c ': kubernetes-ca'
-  register: kubernetes_ca_exists
-  no_log: True
+  register: ipa_kubernetes_ca_exists
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
   failed_when: False
   changed_when: False
   become: true
@@ -15,28 +16,53 @@
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin  > /dev/null
     ipa ca-add kubernetes-ca --subject "CN=kubernetes-ca,O={{ company_domain | upper }}"
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_kubernetes_ca_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca accl exists
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa caacl-find | grep -c ': kubernetes-ca-acl'
+  register: ipa_kubernetes_ca_acl_exists
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: False
   changed_when: False
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | create kube admin ca access list category
   shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa caacl-add user-kubernetes-kube-admins
-  when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+    ipa caacl-add kubernetes-ca-acl --hostcat=all --servicecat=all --usercat=all
+  when: #TODO create hostcat and servicecat for better control
+   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true
 
-- name: ansible-orchestration | ipa-kubernetes-ca | add kube-ca to kube admin category
+- name: ansible-orchestration | ipa-kubernetes-ca | add kube-ca to ca-acl
   shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin
-    ipa caacl-add-ca user-kubernetes-kube-admins --ca kubernetes-ca
+    ipa caacl-add-ca kubernetes-ca-acl --ca kubernetes-ca
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca group exists
+  shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa group-find | grep -c ': kubernetes-administrators'
+  register: ipa_group_kubeadm_exists
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: False
   changed_when: False
   become: true
 
@@ -45,17 +71,30 @@
     ipaadmin_password: "{{ company_realm_password }}"
     name: "kubernetes-administrators"
   delegate_to: "{{ groups[idm_group][0] }}"
-  no_log: True
+  no_log: "{{ secure_logs }}"
   when:
-   - not kubernetes_ca_exists.stdout == '1'
+   - not ipa_group_kubeadm_exists.stdout == '1'
 
-- name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
+#- name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
+#  shell: |
+#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+#    ipa caacl-add-user kubernetes-ca-acl --groups=kubernetes-administrators
+#  when:
+#   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+#   - not ipa_group_kubeadm_exists.stdout == '1'
+#  no_log: "{{ secure_logs }}"
+#  delegate_to: "{{ groups[idm_group][0] }}"
+#  changed_when: False
+#  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca group exists
   shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa caacl-add-user user-kubernetes-kube-admins --group kubernetes-administrators
-  when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+    ipa certprofile-find | grep -c ': kubeAdministrators'
+  register: ipa_certprofile_kubeadm_exists
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: False
   changed_when: False
   become: true
 
@@ -64,8 +103,9 @@
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa certprofile-show --out /tmp/ipa_default_ca_profile.cfg caIPAserviceCert
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true
 
@@ -75,8 +115,9 @@
     regexp: '^profileId='
     line: profileId=kubeAdministrators
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true
 
@@ -86,8 +127,21 @@
     regexp: '^visible='
     line: visible=true
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
+  changed_when: False
+  become: true
+
+- name: ansible-orchestration | ipa-kubernetes-ca | adapt the csr organization from csr
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_default_ca_profile.cfg
+    regexp: "{{ 'policyset.serverCertSet.1.default.params.name' | regex_escape() }}.*"
+    line: policyset.serverCertSet.1.default.params.name=CN=$request.req_subject_name.cn$, O=system:masters
+  when:
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true
 
@@ -96,17 +150,19 @@
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa certprofile-import kubeAdministrators --file /tmp/ipa_default_ca_profile.cfg --desc "Kubernetes administration certificates" --store TRUE
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | peer ca kubeAdm profile to ca
   shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa caacl-add-profile user-kubernetes-kube-admins --certprofile kubeAdministrators
+    ipa caacl-add-profile kubernetes-ca-acl --certprofile kubeAdministrators
   when:
-   - not kubernetes_ca_exists.stdout == '1'
-  no_log: True
+   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
   changed_when: False
   become: true

@@ -1,13 +1,4 @@
 ---
-- name: ansible-orchestration | admin-user | install required libraries
-  ansible.builtin.package:
-    name: "{{ item }}"
-    state: present
-  with_items:
-    - "python3-pyOpenSSL"
-    - "python3-cryptography"
-  become: true
-
 - name: ansible-orchestration | admin-user | create a kube credential folder
   ansible.builtin.file:
     state: directory
@@ -43,11 +34,11 @@
   community.crypto.openssl_csr:
     path: "{{ kube_credential_folder }}/kubeadm.csr"
     privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
-    country_name: "FR"
+    country_name: "{{ kube_credential_country_name }}"
     organization_name: "clusterAdministrators"
     email_address: "{{ kube_credential_email_address }}"
     common_name: "kubeClusteradm"
-#    subject_alt_name: "{{ (['DNS:'] | product(kube_alt_names) | map('join') | list) | default([]) | flatten }}"
+    subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
   when:
    - kube_masters_group in group_names
   become: true

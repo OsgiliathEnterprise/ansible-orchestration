@@ -10,7 +10,11 @@ driver:
   name: vagrant
   provider:
     name: libvirt
-lint: yamllint . && flake8 && ansible-lint --exclude=meta,.cache
+lint: |
+  set -e
+  yamllint .
+  flake8
+  ANSIBLE_ROLES_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community ANSIBLE_COLLECTIONS_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community-collections ansible-lint
 platforms:
   - name: master.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
@@ -24,18 +28,20 @@ platforms:
         type: dhcp
     groups:
       - kube_master
+      - ipaclients
   - name: node1.osgiliath.test
     box: tcharl/fedora-33-cgroupv1
     provider_options:
       driver: '"kvm"'
       cpus: 2
       memory: 2048
+    groups:
+      - kube_node
+      - ipaservers
     interfaces:
       - auto_config: true
         network_name: private_network
         type: dhcp
-    groups:
-      - kube_node
 provisioner:
   name: ansible
 #  config_options:
