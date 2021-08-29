@@ -16,7 +16,7 @@ roles:
   - name: tcharl.ansible_volumes
     source: https://galaxy.ansible.com
 
-  - name: tcharl.ansible_manage_lvm
+  - name: mrlesmithjr.manage-lvm
     source: https://galaxy.ansible.com
 
   - name: tcharl.ansible_hostname
@@ -44,6 +44,9 @@ roles:
     source: https://galaxy.ansible.com
 
   - name: tcharl.ansible_securehost
+    source: https://galaxy.ansible.com
+
+  - name: tcharl.ansible_orchestration_cli
     source: https://galaxy.ansible.com
 
   - name: geerlingguy.ntp

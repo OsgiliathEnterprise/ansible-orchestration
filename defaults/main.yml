@@ -16,4 +16,4 @@ kubernetes_certificates_path: "/etc/kubernetes/pki/"
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
-iPA: Yes
+configure_mesh: Yes

@@ -121,3 +121,9 @@
 
 - name: ansible-orchestration | create admin user
   ansible.builtin.import_tasks: admin-user.yml
+
+- name: ansible-orchestration | service-mesh
+  ansible.builtin.include_tasks: service-mesh.yml
+  when:
+   - configure_mesh
+   - kube_masters_group in group_names

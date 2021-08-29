@@ -1,7 +1,7 @@
 galaxy_info:
   role_name: ansible_orchestration
   author: OsgiliathEnterprise
-  description: Wrapper role over the wonderful https://github.com/geerlingguy/ansible-role-kubernetes
+  description: Wrapper role over the wonderful https://github.com/geerlingguy/ansible-role-kubernetes and freeipa secured nfs
   company: Osgiliath Inc.
 
   # If the issue tracker for your role is not on github, uncomment the
@@ -32,6 +32,9 @@ galaxy_info:
    - name: Fedora
      versions:
       - 31
+      - 32
+      - 33
+      - 34
   #   - 25
   # - name: SomePlatform
   #   versions:

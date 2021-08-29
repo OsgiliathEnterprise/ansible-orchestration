@@ -17,8 +17,6 @@
         company_domain: osgiliath.test
         company_realm_password: '123ADMin'
         reset_kube: True
-#        kube_alt_names:
-#          - "kubeadm.osgiliath.net"
 
 - name: Converge node
   hosts:
