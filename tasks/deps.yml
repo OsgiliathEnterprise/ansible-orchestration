@@ -27,7 +27,6 @@
   become: True
 
 - name: ansible-orchestration | deps | import nameserver role
-  include_role:
+  import_role:
     name: tcharl.ansible_nameserver
-  vars:
-    ansible_become: Yes
+  become: True

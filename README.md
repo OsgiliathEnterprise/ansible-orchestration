@@ -7,7 +7,7 @@ Orchestration
 * Chat: [![Join the chat at https://gitter.im/OsgiliathEnterprise/platform](https://badges.gitter.im/OsgiliathEnterprise/platform.svg)](https://gitter.im/OsgiliathEnterprise/platform?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 
-Combines LVM, Docker, Libvirt, Freeipa, kerberized NFS and geerlinguy.kubernetes roles to configure a stateful kubernetes with good security (firewall and network rules, and secure storage).
+Combines Firewalld, hostname, docker, helm, istio configuration and geerlinguy.kubernetes roles to configure a kubernetes with good security and reasonable defaults (firewall storage and network rules).
 
 Basically, it will configure X master nodes and Y workers.
 

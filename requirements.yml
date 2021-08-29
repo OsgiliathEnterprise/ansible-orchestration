@@ -51,3 +51,6 @@ roles:
 
   - name: geerlingguy.ntp
     source: https://galaxy.ansible.com
+
+  - name: tcharl.ansible_orchestration # Circular dep due to orch_cli
+    source: https://galaxy.ansible.com

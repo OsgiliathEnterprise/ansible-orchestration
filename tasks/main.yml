@@ -2,11 +2,11 @@
 # tasks file for ansible-orchestration
 
 - name: ansible-orchestration | role dependencies
-  ansible.builtin.include_tasks: deps.yml
-  when: standalone_role
+  ansible.builtin.include_tasks: prereq.yml
 
 - name: ansible-orchestration | role dependencies
-  ansible.builtin.include_tasks: prereq.yml
+  ansible.builtin.include_tasks: deps.yml
+  when: standalone_role
 
 - name: ansible-orchestration | gather facts on newly created machines
   setup:
