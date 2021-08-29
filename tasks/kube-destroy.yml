@@ -4,7 +4,7 @@
   command: "kubectl drain {{ registeredhost }} --delete-local-data --force --ignore-daemonsets"
   become: Yes
   failed_when: false
-  loop: "{{ groups[kube_nodes_group] | list }}"
+  loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
   loop_control:
     loop_var: registeredhost
   when:
@@ -14,7 +14,7 @@
   command: "kubectl delete node {{ registeredhost }}"
   become: Yes
   failed_when: false
-  loop: "{{ groups[kube_nodes_group] | list }}"
+  loop: "{{ groups[kube_nodes_group]  | default([]) | list }}"
   loop_control:
     loop_var: registeredhost
   when:
