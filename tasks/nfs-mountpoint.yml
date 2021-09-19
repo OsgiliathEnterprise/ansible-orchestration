@@ -1,0 +1,7 @@
+---
+
+- name: ansible-orchestration | nfs-mountpoint | iterate through kubernetes volumes
+  ansible.builtin.include_tasks: persistent-volume.yml
+  loop: "{{ nfs_mountpoint.kubernetes_volumes | default([]) }}"
+  loop_control:
+    loop_var: kube_volume_to_mount

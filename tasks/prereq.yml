@@ -37,3 +37,25 @@
   command: "hostname"
   register: kube_machine_hostname
   changed_when: false
+
+- name: ansible-orchestration | gather facts on newly created machines
+  setup:
+  delegate_facts: true
+  delegate_to: "{{ groups['kube_master'][0] }}"
+  register: masterfacts
+
+- name: ansible-orchestration | get master facts
+  debug:
+    var: masterfacts
+    verbosity: 3
+
+- name: ansible-orchestration | compute ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: kube_master_ip
+
+- name: ansible-orchestration | ensure swap disabled
+  command: "swapoff --all"
+  changed_when: False
+  become: true
+

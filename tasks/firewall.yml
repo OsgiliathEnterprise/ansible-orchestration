@@ -1,0 +1,42 @@
+---
+
+- name: ansible-orchestration | include firewalld role for masters
+  include_role:
+    name: tcharl.ansible_routing
+  vars:
+    firewalld_zones:
+      - name: "{{ kube_firewall_zone }}"
+        enabled_service:
+          - service: "ssh"
+          - service: "http"
+          - service: "https"
+        enabled_ports:
+          - port: 6443
+            protocol: tcp
+          - port: 2379
+            protocol: tcp
+          - port: 2380
+            protocol: tcp
+          - port: 10250
+            protocol: tcp
+          - port: 10251
+            protocol: tcp
+          - port: 10252
+            protocol: tcp
+  when: kube_masters_group in group_names
+
+- name: ansible-orchestration | include firewalld role for nodes
+  include_role:
+    name: tcharl.ansible_routing
+  vars:
+    firewalld_zones:
+      - name: "{{ kube_firewall_zone }}"
+        enabled_service:
+          - service: "ssh"
+        enabled_ports:
+          - port: 10250
+            protocol: tcp
+        enabled_port_ranges:
+          - port_range: "30000-32767"
+            protocol: tcp
+  when: kube_nodes_group in group_names

@@ -12,8 +12,11 @@ kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
 kube_credential_cn: "Kubernetes administration credential"
-kubernetes_certificates_path: "/etc/kubernetes/pki/"
+kube_config_folder: "/etc/kubernetes"
+kube_config_path: "{{ kube_config_folder }}/admin.conf"
+kubernetes_certificates_path: "{{ kube_config_folder }}/pki/"
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
 configure_mesh: Yes
+istio_version: 1.11.2

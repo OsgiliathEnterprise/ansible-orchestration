@@ -2,68 +2,19 @@
 # tasks file for ansible-orchestration
 
 - name: ansible-orchestration | role dependencies
-  ansible.builtin.include_tasks: prereq.yml
-
-- name: ansible-orchestration | role dependencies
   ansible.builtin.include_tasks: deps.yml
   when: standalone_role
 
-- name: ansible-orchestration | gather facts on newly created machines
-  setup:
-  delegate_facts: true
-  delegate_to: "{{ groups['kube_master'][0] }}"
-  register: masterfacts
-
-- name: ansible-orchestration | get master facts
-  debug:
-    var: masterfacts
-    verbosity: 3
-
-- name: ansible-orchestration | include firewalld role for masters
-  include_role:
-    name: tcharl.ansible_routing
-  vars:
-    firewalld_zones:
-      - name: "{{ kube_firewall_zone }}"
-        enabled_service:
-          - service: "ssh"
-          - service: "http"
-          - service: "https"
-        enabled_ports:
-          - port: 6443
-            protocol: tcp
-          - port: 2379
-            protocol: tcp
-          - port: 2380
-            protocol: tcp
-          - port: 10250
-            protocol: tcp
-          - port: 10251
-            protocol: tcp
-          - port: 10252
-            protocol: tcp
-  when: kube_masters_group in group_names
-
-- name: ansible-orchestration | include firewalld role for nodes
-  include_role:
-    name: tcharl.ansible_routing
-  vars:
-    firewalld_zones:
-      - name: "{{ kube_firewall_zone }}"
-        enabled_service:
-          - service: "ssh"
-        enabled_ports:
-          - port: 10250
-            protocol: tcp
-        enabled_port_ranges:
-          - port_range: "30000-32767"
-            protocol: tcp
-  when: kube_nodes_group in group_names
-
-- name: ansible-orchestration | delegate kubernetes ca creation to IPA
+- name: ansible-orchestration | destroying kube
   include_tasks: kube-destroy.yml
   when:
    - reset_kube
+
+- name: ansible-orchestration | role dependencies
+  ansible.builtin.include_tasks: prereq.yml
+
+- name: ansible-orchestration | import network
+  ansible.builtin.include_tasks: firewall.yml
 
 # - name: ansible-orchestration | delegate kubernetes ca creation to IPA
 #  include_tasks: ipa-certs.yml
@@ -85,23 +36,13 @@
   register: kube_node_group
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
 
-- name: ansible-orchestration | ensure swap disabled
-  command: "swapoff --all"
-  changed_when: False
-  become: true
-
-- name: ansible-orchestration | compute ip if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: targethostfacts_ip
-
 - name: ansible-orchestration | include kubernetes role
   include_role:
     name: geerlingguy.kubernetes
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
   vars:
     ansible_become: true
-    kubernetes_apiserver_advertise_address: "{{ targethostfacts_ip.msg | ansible.netcommon.ipaddr }}"
+    kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.netcommon.ipaddr }}"
     kubernetes_pod_network:
       cni: 'flannel'
       cidr: "{{ kube_cidr }}"
@@ -119,6 +60,15 @@
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
 
+- name: ansible-orchestration | Give secure permissions to kubernetes admin file
+  ansible.builtin.file:
+    path: "{{ kube_config_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: kube_masters_group in group_names
+  become: yes
+
 - name: ansible-orchestration | create admin user
   ansible.builtin.import_tasks: admin-user.yml
 
@@ -127,3 +77,9 @@
   when:
    - configure_mesh
    - kube_masters_group in group_names
+
+- name: ansible-orchestration | nfs persistent-volumes
+  ansible.builtin.include_tasks: nfs-mountpoints.yml
+  when:
+    - nfs_mountpoints is defined
+    - nfs_mountpoints | length > 0

@@ -73,3 +73,21 @@ def test_istio_system_namespace_is_created(host):
     with host.sudo():
         cmd = host.run(command)
         assert '1' in cmd.stdout
+
+
+def test_istio_system_pods_are_configured(host):
+    command = r"""
+    kubectl get pods -n istio-system | \
+    wc -l"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
+
+
+def test_volume_is_create(host):
+    command = r"""
+    kubectl get pv | \
+    egrep -c 'net-artefactrepo.*RWX.*Available.*local-storage"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0

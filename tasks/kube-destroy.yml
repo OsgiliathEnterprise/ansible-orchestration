@@ -11,12 +11,9 @@
     - kube_masters_group in group_names
 
 - name: ansible-orchestration | kube-destroy | delete nodes at master level
-  command: "kubectl delete node {{ registeredhost }}"
+  command: "kubectl delete node --all"
   become: Yes
   failed_when: false
-  loop: "{{ groups[kube_nodes_group]  | default([]) | list }}"
-  loop_control:
-    loop_var: registeredhost
   when:
     - kube_masters_group in group_names
 
@@ -26,6 +23,33 @@
   failed_when: false
   when:
     - kube_masters_group in group_names
+
+- name: ansible-orchestration | kube-destroy | stop kubelet service
+  service:
+    name: kubelet
+    state: stopped
+  failed_when: false
+  become: Yes
+
+- name: ansible-orchestration | kube-destroy | list files
+  ansible.builtin.find:
+    paths: "/var/lib/kubelet/pods"
+    follow: yes
+    file_type: directory
+    recurse: false
+  register: pod_data_folder_content
+  become: Yes
+
+- name: ansible-orchestration | kube-destroy | debug found folders to destroy
+  ansible.builtin.debug:
+    msg: "{{ pod_data_folder_content }}"
+    verbosity: 3
+
+- name: ansible-orchestration | kube-destroy | iterating over the pods
+  ansible.builtin.include_tasks: destroy-kubelet-volumes.yml
+  loop: "{{ pod_data_folder_content.files | map(attribute='path') }}"
+  loop_control:
+    loop_var: pod_files
 
 - name: ansible-orchestration | kube-destroy | remove unwanted packages
   package:
@@ -39,25 +63,62 @@
      - kubernetes-node
      - kubernetes-master
     state: absent
-  become: true
+  become: Yes
 
-- name: ansible-orchestration | kube-destroy | remove configuration folder
-  file:
-    path: /etc/kubernetes
+- name: ansible-orchestration | kube-destroy | Get a list of all running containers
+  docker_host_info:
+    containers: True
+  become: Yes
+  register: docker_info
+
+- name: ansible-orchestration | kube-destroy | Debug a list of all running containers
+  ansible.builtin.debug:
+    msg: "{{ docker_info.containers }}"
+
+- name: ansible-orchestration | kube-destroy | Stop all running containers
+  community.docker.docker_container:
+    name: '{{ item.Names[0] | regex_replace("^/", "") }}'
     state: absent
   become: Yes
+  loop: '{{ docker_info.containers }}'
+
+- name: ansible-orchestration | kube-destroy | Prune everything
+  community.docker.docker_prune:
+    containers: yes
+    images: yes
+    networks: yes
+    volumes: yes
+    builder_cache: yes
+  become: Yes
+
+- name: ansible-orchestration | kube-destroy | remove kubernetes configuration folder
+  file:
+    path: "{{ item }}"
+    state: absent
+    recurse: yes
+  become: Yes
+  loop:
+    - /etc/cni
+    - /etc/kubernetes
+    - /etc/sysconfig/kubelet
+    - /etc/systemd/system/multi-user.target.wants/kubelet.service
+    - /root/.kube
+    - /usr/lib/etcd
+    - /usr/lib/kubelet
+    - /usr/lib/systemd/system/kubelet.service
+    - /usr/lib/systemd/system/kubelet.service.d
+    - /var/lib/etcd
+    - /var/lib/cni
+    - /var/lib/kubelet
   failed_when: false
 
-- name: ansible-orchestration | kube-destroy | remove etcd configuration
-  file:
-    path: /var/lib/etcd
-    state: absent
+- name: ansible-orchestration | kube-destroy | Just force systemd to reread configs (2.4 and above)
+  ansible.builtin.systemd:
+    daemon_reload: yes
   become: Yes
-  failed_when: false
 
-- name: ansible-orchestration | kube-destroy | remove kubelet configuration
-  file:
-    path: /var/lib/kubelet
-    state: absent
-  become: Yes
-  failed_when: false
+- name: ansible-routing | handler | restart-firewall
+  service:
+    name: firewalld
+    state: restarted
+  become: yes

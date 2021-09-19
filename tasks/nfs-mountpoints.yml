@@ -1,0 +1,7 @@
+---
+
+- name: ansible-orchestration | nfs-mountpoints | iterate through mountpoints
+  ansible.builtin.include_tasks: nfs-mountpoint.yml
+  loop: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten }}"
+  loop_control:
+    loop_var: nfs_mountpoint

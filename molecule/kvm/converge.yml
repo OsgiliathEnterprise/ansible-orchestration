@@ -34,3 +34,9 @@
         hostname_reboot: false
         reset_kube: True
         kube_firewall_zone: 'public'
+        nfs_mountpoints:
+          - host: master.osgiliath.test
+            mountpoints:
+              - local: /net
+                expose_kube_volume: True
+                mountsize: 1

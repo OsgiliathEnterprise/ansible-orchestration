@@ -34,3 +34,11 @@
         hostname_reboot: false
         reset_kube: True
         kube_firewall_zone: 'public'
+        nfs_mountpoints: # Mountpoints should be configured by the tcharl.ansible_volume (nfs mounts) to be available on each node
+          - host: master.osgiliath.test
+            mountpoints:
+              - local: /net
+                kubernetes_volumes:
+                - volume_kind: Hardwire # TODO CSI
+                  subtree: /artefactrepo
+                  mountsize: 1

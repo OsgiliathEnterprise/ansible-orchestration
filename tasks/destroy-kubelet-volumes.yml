@@ -1,0 +1,21 @@
+---
+
+- name: ansible-orchestration | destroy-kubelet-volumes | get volume name
+  find:
+    paths: "{{ pod_files }}/volumes/kubernetes.io~secret"
+    file_type: directory
+    follow: yes
+    recurse: false
+  register: kube_volume
+  become: Yes
+
+- name: ansible-orchestration | destroy-kubelet-volumes | get volume name
+  debug:
+    msg: "{{ kube_volume }}"
+    verbosity: 3
+
+- name: ansible-orchestration | destroy-kubelet-volumes | unmount
+  ansible.posix.mount:
+    path: "{{ kube_volume.files[0] | map(attribute='path') }}"
+    state: absent
+  become: Yes
