@@ -5,7 +5,7 @@ metadata:
   name: {{ nfs_mountpoint.local | replace('/', '') }}-{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}
 spec:
   capacity:
-    storage: {{ nfs_mountpoint.mountsize | default('5') }}Gi
+    storage: {{ kube_volume_to_mount.mountsize | default('5') }}Gi
   volumeMode: Filesystem
   accessModes:
   - ReadWriteMany
