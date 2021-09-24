@@ -1,6 +1,7 @@
 galaxy_info:
   role_name: ansible_orchestration
   author: OsgiliathEnterprise
+  namespace: tcharl
   description: Wrapper role over the wonderful https://github.com/geerlingguy/ansible-role-kubernetes and freeipa secured nfs
   company: Osgiliath Inc.
 
