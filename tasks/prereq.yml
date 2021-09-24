@@ -58,4 +58,3 @@
   command: "swapoff --all"
   changed_when: False
   become: true
-
