@@ -4,6 +4,8 @@
 - name: ansible-orchestration | role dependencies
   ansible.builtin.include_tasks: deps.yml
   when: standalone_role
+  tags:
+    - standalone
 
 - name: ansible-orchestration | destroying kube
   include_tasks: kube-destroy.yml

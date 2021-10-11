@@ -38,6 +38,7 @@
           - host: master.osgiliath.test
             mountpoints:
               - local: /net
+                remote: /var/shared
                 kubernetes_volumes:
                 - volume_kind: Hardwire # TODO CSI
                   subtree: /artefactrepo

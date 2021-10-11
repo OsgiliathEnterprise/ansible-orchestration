@@ -19,4 +19,4 @@ standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
 configure_mesh: Yes
-istio_version: 1.11.2
+istio_version: 1.11.3

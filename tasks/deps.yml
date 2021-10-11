@@ -17,9 +17,11 @@
   become: True
 
 - name: ansible-orchestration | deps | import bootstrap role
-  import_role:
+  include_role:
     name: robertdebock.bootstrap
-  become: True
+  vars:
+    ansible_become: True
+    bootstrap_ansible_user: root
 
 - name: ansible-orchestration | deps | import securehost role
   import_role:
