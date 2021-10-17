@@ -5,7 +5,7 @@
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
-        name: "ansible-orchestration"
+        name: tcharl.ansible_orchestration
       vars:
         secure_logs: False
         preferred_nic: "eth1"
@@ -24,7 +24,7 @@
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
-        name: "ansible-orchestration"
+        name: tcharl.ansible_orchestration
       vars:
         secure_logs: False
         preferred_nic: "eth1"
@@ -34,12 +34,14 @@
         hostname_reboot: false
         reset_kube: True
         kube_firewall_zone: 'public'
-        nfs_mountpoints: # Mountpoints should be configured by the tcharl.ansible_volume (nfs mounts) to be available on each node
+        nfs_mountpoints: # Mountpoints should be configured by the tcharl.ansible_volume (nfs mounts) on the server and client side to be mounted on each node before kubernetes comes in
           - host: master.osgiliath.test
             mountpoints:
+              - remote: /var/shared/csi
+                local: /net
+                csi_mount: Yes
               - local: /net
-                remote: /var/shared
+                remote: /var/shared/volume
                 kubernetes_volumes:
-                - volume_kind: Hardwire # TODO CSI
-                  subtree: /artefactrepo
+                - subtree: /artefactrepo
                   mountsize: 1

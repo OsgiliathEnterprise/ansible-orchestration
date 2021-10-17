@@ -2,7 +2,7 @@
 testinfra_hosts = ["master.osgiliath.test"]
 
 
-def test_apiserver_port_is_opened(host):
+def test_api_server_port_is_opened(host):
     with host.sudo():
         command = """firewall-cmd --list-ports --zone=public | \
         grep -c '6443/tcp'"""
@@ -87,7 +87,30 @@ def test_istio_system_pods_are_configured(host):
 def test_volume_is_create(host):
     command = r"""
     kubectl get pv | \
-    egrep -c 'net-artefactrepo.*RWX.*Available.*local-storage"""
+    egrep -c 'net-artefactrepo.*RWX.*Available.*local-storage'"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
+
+
+def test_csi_provisioner_hostname_is_created(host):
+    command = """kubectl get ns | grep -c 'hostpath-provisioner'"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
+
+
+def test_csi_pod_is_created(host):
+    command = """kubectl get po -n hostpath-provisioner | \
+    grep -c 'hostpath-provisioner-csi'"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
+
+
+def test_csi_operator_pod_is_created(host):
+    command = """kubectl get po -n hostpath-provisioner | \
+    grep -c 'hostpath-provisioner-operator'"""
     with host.sudo():
         cmd = host.run(command)
         assert int(cmd.stdout) > 0

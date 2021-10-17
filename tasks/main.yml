@@ -2,7 +2,7 @@
 # tasks file for ansible-orchestration
 
 - name: ansible-orchestration | role dependencies
-  ansible.builtin.include_tasks: deps.yml
+  ansible.builtin.include_tasks: requirements.yml
   when: standalone_role
   tags:
     - standalone
@@ -35,7 +35,7 @@
 - name: ansible-orchestration | compute kubernetes node group
   debug:
     msg: "{{ 'master' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
-  register: kube_node_group
+  register: kube_node_role
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
 
 - name: ansible-orchestration | include kubernetes role
@@ -49,7 +49,7 @@
       cni: 'flannel'
       cidr: "{{ kube_cidr }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
-    kubernetes_role: "{{ kube_node_group.msg }}"
+    kubernetes_role: "{{ kube_node_role.msg }}"
     kubernetes_config_cluster_configuration:
       networking:
         podSubnet: "{{ kubernetes_pod_network.cidr }}"
@@ -85,3 +85,5 @@
   when:
     - nfs_mountpoints is defined
     - nfs_mountpoints | length > 0
+    - kube_nodes_group in group_names
+    - inventory_hostname == groups[kube_nodes_group][0] # need to configure kubernetes volumes once for all nodes

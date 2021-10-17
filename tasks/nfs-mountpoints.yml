@@ -1,7 +1,12 @@
 ---
 
-- name: ansible-orchestration | nfs-mountpoints | iterate through mountpoints
+- name: "ansible-orchestration | nfs-mountpoints | iterate through kubernetes volumes mountpoints on {{ nfs_mountpoint.local }}"
   ansible.builtin.include_tasks: nfs-mountpoint.yml
-  loop: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten }}"
+  loop: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('kubernetes_volumes', 'defined') }}"
   loop_control:
     loop_var: nfs_mountpoint
+
+- name: "ansible-orchestration | nfs-mountpoints | install csi"
+  ansible.builtin.include_tasks: csi-volume.yml
+  when:
+   - nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('csi_mount', 'defined') | selectattr('csi_mount', 'equalto', true)

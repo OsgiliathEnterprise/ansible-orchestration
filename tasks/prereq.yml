@@ -14,6 +14,11 @@
     state: absent
   become: true
 
+- name: ansible-orchestration-cli | kube-master-tasks | install prereq
+  ansible.builtin.pip:
+    name: kubernetes
+  become: true
+
 - name: ansible-orchestration | deps | install required libraries
   ansible.builtin.package:
     name: "{{ item }}"

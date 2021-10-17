@@ -28,6 +28,9 @@ roles:
   - name: robertdebock.bootstrap
     source: https://galaxy.ansible.com
 
+  - name: robertdebock.environment
+    source: https://galaxy.ansible.com
+
   - name: robertdebock.core_dependencies
     source: https://galaxy.ansible.com
 

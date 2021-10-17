@@ -14,7 +14,7 @@
         kind: git
         branch: master
         descriptors:
-          - namespaces/istio-system-ns.yml
+          - path: namespaces/istio-system-ns.yml
     helm_install: Yes
 
 - name: ansible-orchestration | service-mesh | create remote temporary directory
@@ -31,6 +31,7 @@
 
 - name: ansible-orchestration | service-mesh | download the istio release
   ansible.builtin.command: "{{ istio_temp_remote_directory.path }}/istio-installer.sh"
+  changed_when: False # to do test
   args:
     chdir: "{{ istio_temp_remote_directory.path }}"
 

@@ -5,7 +5,7 @@
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
-        name: "ansible-orchestration"
+        name: tcharl.ansible_orchestration
       vars:
         secure_logs: False
         kubernetes_allow_pods_on_master: False
@@ -25,7 +25,7 @@
   tasks:
     - name: "Include Ansible Orchestration"
       include_role:
-        name: "ansible-orchestration"
+        name: tcharl.ansible_orchestration
       vars:
         secure_logs: False
         hostname: "node1.osgiliath.test"

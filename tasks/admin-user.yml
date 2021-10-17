@@ -64,11 +64,12 @@
   become: true
 
 - name: ansible-orchestration | admin-user | create kubernetes user
-  ansible.builtin.command: "kubectl apply -f /tmp/clusteradministrators.yml"
+  kubernetes.core.k8s:
+    state: present
+    src: /tmp/clusteradministrators.yml
   when:
    - kube_masters_group in group_names
   failed_when: false
-  changed_when: False
   become: true
 
 - name: ansible-orchestration | admin-user | create admin account
@@ -80,12 +81,13 @@
     mode: 0640
   become: true
 
-- name: ansible-orchestration | admin-user | create kubernetes user
-  ansible.builtin.command: "kubectl apply -f /tmp/cluster-administrators-crb.yml"
+- name: ansible-orchestration | admin-user | create kubernetes user rights
+  kubernetes.core.k8s:
+    state: present
+    src: /tmp/cluster-administrators-crb.yml
   when:
    - kube_masters_group in group_names
   failed_when: false
-  changed_when: False
   become: true
 
 - name: ansible-orchestration | admin-user | configure kubernetes with credentials

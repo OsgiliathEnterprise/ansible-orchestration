@@ -11,22 +11,11 @@
   ansible.builtin.template:
     src: persistent-volume.yml.j2
     dest: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
-    owner: root
-    group: root
     mode: '0600'
-  when:  kube_volume_to_mount.volume_kind == 'Hardwire'
   delegate_to: "{{ groups['kube_master'][0] }}"
-  become: true
-
-- name: ansible-volumes | install prerequisite - docker
-  pip:
-    name: kubernetes
-    state: present
-  delegate_to: "{{ groups['kube_master'][0] }}"
-  become: true
 
 - name: ansible-orchestration | persistent-volume | execute kubectl apply # TODO replace by CSI storage
-  community.kubernetes.k8s:
+  kubernetes.core.k8s:
     state: present
     src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
     ca_cert: "{{ kube_cacert_path | default(omit) }}"
@@ -35,5 +24,4 @@
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
   delegate_to: "{{ groups['kube_master'][0] }}"
-  when:  kube_volume_to_mount.volume_kind == "Hardwire"
   become: true
