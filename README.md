@@ -7,9 +7,16 @@ Orchestration
 * Chat: [![Join the chat at https://gitter.im/OsgiliathEnterprise/platform](https://badges.gitter.im/OsgiliathEnterprise/platform.svg)](https://gitter.im/OsgiliathEnterprise/platform?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 
-Combines Firewalld, hostname, docker, helm, istio configuration and geerlinguy.kubernetes roles to configure a kubernetes with good security and reasonable defaults (firewall storage and network rules).
+Combines Firewalld, hostname, kubevirt-csi, docker, helm, istio configuration and geerlinguy.kubernetes roles to configure a kubernetes with good security and reasonable defaults (firewall storage and network rules).
 
 Basically, it will configure X master nodes and Y workers.
+You can transform this Kube into a stateful one with the help of the tcharl.ansible_volume role:you'll just have to mount the same NFS mounpoint on all your node and configure the kubevirt-csi driver to get kube storage
+```
+mountpoints:
+  - remote: /var/shared/csi
+    local: /net
+    csi_mount: Yes
+```
 
 This role will also generate a Kubernetes cluster admin client certificate keypair  available on the master's '/home/kubecreds' machine folder 
 

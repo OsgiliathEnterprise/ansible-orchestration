@@ -16,7 +16,7 @@
     descriptor_sets:
       - url: https://github.com/kubevirt/hostpath-provisioner-operator.git
         kind: git
-        branch: master
+        branch: v0.10.1
         descriptors:
           - path: deploy/namespace.yaml
             namespace: hostpath-provisioner

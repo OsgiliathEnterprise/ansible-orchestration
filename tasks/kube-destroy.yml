@@ -1,7 +1,7 @@
 ---
 
 - name: ansible-orchestration | kube-destroy | drain nodes
-  command: "kubectl drain {{ registeredhost }} --delete-local-data --force --ignore-daemonsets"
+  command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-local-data --force --ignore-daemonsets"
   become: Yes
   failed_when: false
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
