@@ -17,7 +17,7 @@ lint: |
   ANSIBLE_ROLES_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community ANSIBLE_COLLECTIONS_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community-collections ansible-lint
 platforms:
   - name: master.osgiliath.test
-    box: fedora/34-cloud-base
+    box: fedora/35-cloud-base
     provider_options:
       cpus: 2
       memory: 2048
@@ -28,7 +28,7 @@ platforms:
     groups:
       - kube_master
   - name: node1.osgiliath.test
-    box: fedora/34-cloud-base
+    box: fedora/35-cloud-base
     provider_options:
       cpus: 2
       memory: 2048

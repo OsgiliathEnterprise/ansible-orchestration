@@ -99,16 +99,16 @@
   become: true
 
 - name: ansible-orchestration | admin-user | cat kubernetes admin certificates
-  command: "cat {{ kube_credential_folder }}/kubeadm.crt"
+  ansible.builtin.slurp:
+    src: "{{ kube_credential_folder }}/kubeadm.crt"
   register: key
-  changed_when: False
   when:
    - kube_masters_group in group_names
   become: true
 
 - name: ansible-orchestration | admin-user | cat kubernetes admin certificates
   debug:
-    var: key.stdout
+    msg: "{{ key['content'] | b64decode }}"
   when:
    - kube_masters_group in group_names
   become: true
