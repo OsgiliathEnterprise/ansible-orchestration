@@ -15,7 +15,7 @@
 #        kube_alt_names:
 #          - "kubeadm.osgiliath.net"
   roles:
-    - role: tcharl.ansible_orchestration
+    - role: ansible-orchestration
 
 - name: Converge node
   hosts:

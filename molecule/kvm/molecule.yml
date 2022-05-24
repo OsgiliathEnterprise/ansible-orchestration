@@ -26,7 +26,6 @@ platforms:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.4"
-        virtualbox__intnet: true
     groups:
       - kube_master
   - name: node1.osgiliath.test
@@ -41,7 +40,6 @@ platforms:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.5"
-        virtualbox__intnet: true
 provisioner:
   name: ansible
 #  config_options:
