@@ -1,7 +1,7 @@
 ---
 
 - name: ansible-orchestration | ipa-kubernetes-ca | check if kube generic ca exists
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa ca-find | grep -c ': kubernetes-ca'
   register: ipa_kubernetes_ca_exists
@@ -12,7 +12,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | create ip lightweight ca
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin  > /dev/null
     ipa ca-add kubernetes-ca --subject "CN=kubernetes-ca,O={{ company_domain | upper }}"
   when:
@@ -23,7 +23,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca accl exists
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa caacl-find | grep -c ': kubernetes-ca-acl'
   register: ipa_kubernetes_ca_acl_exists
@@ -34,7 +34,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | create kube admin ca access list category
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa caacl-add kubernetes-ca-acl --hostcat=all --servicecat=all --usercat=all
   when: #TODO create hostcat and servicecat for better control
@@ -45,7 +45,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | add kube-ca to ca-acl
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin
     ipa caacl-add-ca kubernetes-ca-acl --ca kubernetes-ca
   when:
@@ -56,7 +56,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca group exists
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa group-find | grep -c ': kubernetes-administrators'
   register: ipa_group_kubeadm_exists
@@ -88,7 +88,7 @@
 #  become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | check if kube ca group exists
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa certprofile-find | grep -c ': kubeAdministrators'
   register: ipa_certprofile_kubeadm_exists
@@ -99,7 +99,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | get the ipa default ca profile
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa certprofile-show --out /tmp/ipa_default_ca_profile.cfg caIPAserviceCert
   when:
@@ -146,7 +146,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | import the according kubernetes admin profile
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa certprofile-import kubeAdministrators --file /tmp/ipa_default_ca_profile.cfg --desc "Kubernetes administration certificates" --store TRUE
   when:
@@ -157,7 +157,7 @@
   become: true
 
 - name: ansible-orchestration | ipa-kubernetes-ca | peer ca kubeAdm profile to ca
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa caacl-add-profile kubernetes-ca-acl --certprofile kubeAdministrators
   when:

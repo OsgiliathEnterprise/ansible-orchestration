@@ -35,4 +35,4 @@
             expose_kube_volume: True
             mountsize: 1
   roles:
-    - role: tcharl.ansible_orchestration
+    - role: ansible-orchestration

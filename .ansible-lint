@@ -1,6 +1,6 @@
 exclude_paths:
- - .cache/  # implicit unless exclude_paths is defined in config
- - meta/main.yml
- - ~/.cache
+ - .cache/
+ - meta/
+ - molecule/
 skip_list:
  - '106'  # Role name {} does not match ``^[a-z][a-z0-9_]+$`` pattern

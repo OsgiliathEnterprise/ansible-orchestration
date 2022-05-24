@@ -89,7 +89,7 @@
 #   - not ipa_group_kubeadm_exists.stdout == '1'
 
 - name: ansible-orchestration | ipa-api-server | find apiserver crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
     ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver.crt --principal HTTP/apiserver.kubernetes.{{ company_domain }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver.csr
   when:

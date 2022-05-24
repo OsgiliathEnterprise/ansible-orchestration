@@ -1,14 +1,17 @@
 ---
 
 - name: ansible-orchestration | deps | Install needed package
-  package:
+  ansible.builtin.package:
     name:
      - iproute-tc
+     - python3-pip
+     - python3-pyOpenSSL
+     - python3-cryptography
     state: present
   become: true
 
 - name: ansible-orchestration | deps | remove unwanted packages
-  package:
+  ansible.builtin.package:
     name:
      - zram-generator-defaults
     state: absent
@@ -19,17 +22,8 @@
     name: kubernetes
   become: true
 
-- name: ansible-orchestration | deps | install required libraries
-  ansible.builtin.package:
-    name: "{{ item }}"
-    state: present
-  with_items:
-    - "python3-pyOpenSSL"
-    - "python3-cryptography"
-  become: true
-
 - name: ansible-orchestration | deps | retreive current machine ip
-  setup:
+  ansible.builtin.setup:
   register: current_host_facts
   delegate_facts: true
 
@@ -39,18 +33,18 @@
   register: current_host_ip
 
 - name: ansible-orchestration | ipa-api-server | get current hostname
-  command: "hostname"
+  ansible.builtin.command: "hostname"
   register: kube_machine_hostname
   changed_when: false
 
 - name: ansible-orchestration | gather facts on newly created machines
-  setup:
+  ansible.builtin.setup:
   delegate_facts: true
   delegate_to: "{{ groups['kube_master'][0] }}"
   register: masterfacts
 
 - name: ansible-orchestration | get master facts
-  debug:
+  ansible.builtin.debug:
     var: masterfacts
     verbosity: 3
 
@@ -60,6 +54,6 @@
   register: kube_master_ip
 
 - name: ansible-orchestration | ensure swap disabled
-  command: "swapoff --all"
+  ansible.builtin.command: "swapoff --all"
   changed_when: False
   become: true

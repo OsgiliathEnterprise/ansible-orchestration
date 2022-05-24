@@ -1,7 +1,7 @@
 ---
 
 - name: ansible-orchestration | kube-destroy | drain nodes
-  command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-local-data --force --ignore-daemonsets"
+  ansible.builtin.command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-local-data --force --ignore-daemonsets"
   become: Yes
   failed_when: false
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
@@ -11,21 +11,21 @@
     - kube_masters_group in group_names
 
 - name: ansible-orchestration | kube-destroy | delete nodes at master level
-  command: "kubectl delete node --all"
+  ansible.builtin.command: "kubectl delete node --all"
   become: Yes
   failed_when: false
   when:
     - kube_masters_group in group_names
 
 - name: ansible-orchestration | kube-destroy | reset kubeadm
-  command: "kubeadm reset -f"
+  ansible.builtin.command: "kubeadm reset -f"
   become: Yes
   failed_when: false
   when:
     - kube_masters_group in group_names
 
 - name: ansible-orchestration | kube-destroy | stop kubelet service
-  service:
+  ansible.builtin.service:
     name: kubelet
     state: stopped
   failed_when: false
@@ -52,7 +52,7 @@
     loop_var: pod_files
 
 - name: ansible-orchestration | kube-destroy | remove unwanted packages
-  package:
+  ansible.builtin.package:
     name:
      - kubeadm
      - kubectl
@@ -66,7 +66,7 @@
   become: Yes
 
 - name: ansible-orchestration | kube-destroy | Get a list of all running containers
-  docker_host_info:
+  community.docker.docker_host_info:
     containers: True
   become: Yes
   register: docker_info
@@ -92,7 +92,7 @@
   become: Yes
 
 - name: ansible-orchestration | kube-destroy | remove kubernetes configuration folder
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: absent
     recurse: yes
@@ -118,7 +118,7 @@
   become: Yes
 
 - name: ansible-routing | handler | restart-firewall
-  service:
+  ansible.builtin.service:
     name: firewalld
     state: restarted
   become: yes

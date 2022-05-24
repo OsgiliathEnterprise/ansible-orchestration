@@ -8,7 +8,7 @@
     - standalone
 
 - name: ansible-orchestration | destroying kube
-  include_tasks: kube-destroy.yml
+  ansible.builtin.include_tasks: kube-destroy.yml
   when:
    - reset_kube
 
@@ -24,7 +24,7 @@
 #   - kube_masters_group in group_names
 
 - name: ansible-orchestration | create kubernetes directory
-  file:
+  ansible.builtin.file:
     path: "/etc/kubernetes"
     state: directory
     owner: root
@@ -33,13 +33,13 @@
   become: True
 
 - name: ansible-orchestration | compute kubernetes node group
-  debug:
+  ansible.builtin.debug:
     msg: "{{ 'master' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
   register: kube_node_role
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
 
 - name: ansible-orchestration | include kubernetes role
-  include_role:
+  ansible.builtin.include_role:
     name: geerlingguy.kubernetes
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
   vars:

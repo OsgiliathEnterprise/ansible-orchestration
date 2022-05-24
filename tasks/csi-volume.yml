@@ -38,7 +38,7 @@
   register: csi_provisionner_temp_directory
 
 - name: ansible-orchestration | csi-volume | deduce host path
-  debug:
+  ansible.builtin.debug:
     msg: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('csi_mount', 'defined') | selectattr('csi_mount', 'equalto', true) | map(attribute='local') | first }}"
   register: csi_provisionner_host_path
 

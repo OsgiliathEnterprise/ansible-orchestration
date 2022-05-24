@@ -1,7 +1,7 @@
 ---
 
 - name: ansible-orchestration | include firewalld role for masters
-  include_role:
+  ansible.builtin.include_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
@@ -28,7 +28,7 @@
     - dependency
 
 - name: ansible-orchestration | include firewalld role for nodes
-  include_role:
+  ansible.builtin.include_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:

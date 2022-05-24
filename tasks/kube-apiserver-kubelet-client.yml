@@ -6,7 +6,7 @@
   become: true
 
 - name: ansible-orchestration | kube-apiserver-kubelet-client | Check that kube-apiserver-kubelet-client certs exists
-  stat:
+  ansible.builtin.stat:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
   register: apiserver_kubelet_client_result
 
@@ -70,7 +70,7 @@
   become: true
 
 - name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
-  shell: |
+  ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
     ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ hostname | default(kube_machine_hostname.stdout) }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr
   when:

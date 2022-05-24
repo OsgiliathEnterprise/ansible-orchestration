@@ -1,7 +1,7 @@
 ---
 
 - name: ansible-orchestration | destroy-kubelet-volumes | get volume name
-  find:
+  ansible.builtin.find:
     paths: "{{ pod_files }}/volumes/kubernetes.io~secret"
     file_type: directory
     follow: yes
@@ -10,7 +10,7 @@
   become: Yes
 
 - name: ansible-orchestration | destroy-kubelet-volumes | get volume name
-  debug:
+  ansible.builtin.debug:
     msg: "{{ kube_volume }}"
     verbosity: 3
 

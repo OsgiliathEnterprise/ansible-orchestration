@@ -25,7 +25,7 @@
 
 - name: ansible-orchestration | service-mesh | download the istio release
   ansible.builtin.get_url:
-    url: https://istio.io/downloadIstio
+    url: "https://istio.io/downloadIstio"
     dest: "{{ istio_temp_remote_directory.path }}/istio-installer.sh"
     mode: '0740'
 

@@ -107,7 +107,7 @@
   become: true
 
 - name: ansible-orchestration | admin-user | cat kubernetes admin certificates
-  debug:
+  ansible.builtin.debug:
     msg: "{{ key['content'] | b64decode }}"
   when:
    - kube_masters_group in group_names

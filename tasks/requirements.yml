@@ -1,34 +1,34 @@
 ---
 - name: ansible-orchestration | deps | import containerization role
-  import_role:
+  ansible.builtin.import_role:
     name: tcharl.ansible_containerization
   become: Yes
 
 - name: ansible-orchestration | deps | import swap role
-  include_role:
+  ansible.builtin.include_role:
     name: geerlingguy.swap
   vars:
     swap_file_state: absent
     ansible_become: True
 
 - name: ansible-orchestration | deps | import core deps role
-  import_role:
+  ansible.builtin.import_role:
     name: robertdebock.core_dependencies
   become: True
 
 - name: ansible-orchestration | deps | import bootstrap role
-  include_role:
+  ansible.builtin.include_role:
     name: robertdebock.bootstrap
   vars:
     ansible_become: True
     bootstrap_ansible_user: root
 
 - name: ansible-orchestration | deps | import securehost role
-  import_role:
+  ansible.builtin.import_role:
     name: tcharl.ansible_securehost
   become: True
 
 - name: ansible-orchestration | deps | import nameserver role
-  import_role:
+  ansible.builtin.import_role:
     name: tcharl.ansible_nameserver
   become: True
