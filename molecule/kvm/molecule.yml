@@ -26,6 +26,7 @@ platforms:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.4"
+        virtualbox__intnet: true
     groups:
       - kube_master
   - name: node1.osgiliath.test
@@ -34,12 +35,13 @@ platforms:
       driver: '"kvm"'
       cpus: 2
       memory: 2048
-    groups:
-      - kube_node
     interfaces:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.5"
+        virtualbox__intnet: true
+    groups:
+      - kube_node
 provisioner:
   name: ansible
 #  config_options:
