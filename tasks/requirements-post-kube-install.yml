@@ -1,0 +1,13 @@
+---
+
+- name: ansible-orchestration | csi-volume | install cert-manager
+  ansible.builtin.include_role:
+    name: tcharl.ansible_orchestration_cli
+  vars:
+    ansible_become: true
+    standalone_role: False
+    kube_sysadmin_client_cert_path: "{{ kube_credential_folder }}/kubeadm.crt"
+    kube_sysadmin_client_key_path: "{{ kube_credential_folder }}/kubeadm.pem"
+    kube_cacert_path: "{{ kubernetes_certificates_path }}ca.crt"
+    skip_master_check: Yes
+    helm_install: True

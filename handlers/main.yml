@@ -7,3 +7,11 @@
     name: kubelet
   become: true
   listen: ansible-orchestration | refresh kube
+
+- name: ansible-orchestration | refresh containerd
+  ansible.builtin.systemd:
+    state: restarted
+    daemon_reload: yes
+    name: containerd
+  become: true
+  listen: ansible-orchestration | refresh containerd

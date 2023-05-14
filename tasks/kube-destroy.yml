@@ -65,31 +65,31 @@
     state: absent
   become: Yes
 
-- name: ansible-orchestration | kube-destroy | Get a list of all running containers
-  community.docker.docker_host_info:
-    containers: True
-  become: Yes
-  register: docker_info
+#- name: ansible-orchestration | kube-destroy | Get a list of all running containers
+#  community.docker.docker_host_info:
+#    containers: True
+#  become: Yes
+#  register: docker_info
 
-- name: ansible-orchestration | kube-destroy | Debug a list of all running containers
-  ansible.builtin.debug:
-    msg: "{{ docker_info.containers }}"
+#- name: ansible-orchestration | kube-destroy | Debug a list of all running containers
+#  ansible.builtin.debug:
+#    msg: "{{ docker_info.containers }}"
 
-- name: ansible-orchestration | kube-destroy | Stop all running containers
-  community.docker.docker_container:
-    name: '{{ item.Names[0] | regex_replace("^/", "") }}'
-    state: absent
-  become: Yes
-  loop: '{{ docker_info.containers }}'
+#- name: ansible-orchestration | kube-destroy | Stop all running containers
+#  community.docker.docker_container:
+#    name: '{{ item.Names[0] | regex_replace("^/", "") }}'
+#    state: absent
+#  become: Yes
+#  loop: '{{ docker_info.containers }}'
 
-- name: ansible-orchestration | kube-destroy | Prune everything
-  community.docker.docker_prune:
-    containers: yes
-    images: yes
-    networks: yes
-    volumes: yes
-    builder_cache: yes
-  become: Yes
+#- name: ansible-orchestration | kube-destroy | Prune everything
+#  community.docker.docker_prune:
+#    containers: yes
+#    images: yes
+#    networks: yes
+#    volumes: yes
+#    builder_cache: yes
+#  become: Yes
 
 - name: ansible-orchestration | kube-destroy | remove kubernetes configuration folder
   ansible.builtin.file:
@@ -111,6 +111,7 @@
     - /var/lib/cni
     - /var/lib/kubelet
   failed_when: false
+  notify: ansible-orchestration | refresh containerd
 
 - name: ansible-orchestration | kube-destroy | Just force systemd to reread configs (2.4 and above)
   ansible.builtin.systemd:

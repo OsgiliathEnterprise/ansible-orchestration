@@ -1,10 +1,16 @@
 ---
 
+- name: ansible-orchestration | csi-volume | install cert-manager
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    release_namespace: cert-manager
+    create_namespace: true
+    chart_version: v0.15.0
+
 - name: ansible-orchestration | csi-volume | install csi driver
   ansible.builtin.include_role:
     name: tcharl.ansible_orchestration_cli
-    apply:
-      delegate_to: "{{ groups['kube_master'][0] }}"
   vars:
     ansible_become: true
     standalone_role: False
@@ -14,9 +20,14 @@
     skip_master_check: Yes
     helm_install: False
     descriptor_sets:
+      - url: https://github.com/cert-manager/cert-manager/releases/download
+        kind: url
+        branch: v1.11.1
+        descriptors:
+          - path: cert-manager.yaml
       - url: https://github.com/kubevirt/hostpath-provisioner-operator.git
         kind: git
-        branch: v0.10.1
+        branch: v0.15.0
         descriptors:
           - path: deploy/namespace.yaml
             namespace: hostpath-provisioner
@@ -34,7 +45,6 @@
   ansible.builtin.tempfile:
     state: directory
     suffix: csi
-  delegate_to: "{{ groups['kube_master'][0] }}"
   register: csi_provisionner_temp_directory
 
 - name: ansible-orchestration | csi-volume | deduce host path
@@ -47,7 +57,6 @@
     src: hostpath-csi.yml.j2
     dest: "{{ csi_provisionner_temp_directory.path }}/hostpath-csi.yml"
     mode: '0600'
-  delegate_to: "{{ groups['kube_master'][0] }}"
 
 - name: ansible-orchestration | csi-volume | execute kubectl apply
   kubernetes.core.k8s:
@@ -58,5 +67,4 @@
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  delegate_to: "{{ groups['kube_master'][0] }}"
   become: true

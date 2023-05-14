@@ -6,15 +6,12 @@
     mode: "0755"
     owner: "root"
     group: "root"
-  when:
-   - kube_masters_group in group_names
   become: true
 
 - name: ansible-orchestration | admin-user | create a kube credential key and store into the first datastore mountpoint
   community.crypto.openssl_privatekey:
     path: "{{ kube_credential_folder }}/kubeadm.pem"
   when:
-   - kube_masters_group in group_names
    - not kube_credential_key is defined
   become: true
 
@@ -22,11 +19,10 @@
   ansible.builtin.copy:
     dest: "{{ kube_credential_folder }}/kubeadm.pem"
     content: "{{ kube_credential_key }}"
-    user: "root"
+    owner: "root"
     group: "root"
     mode: 0600
   when:
-   - kube_masters_group in group_names
    - kube_credential_key is defined
   become: true
 
@@ -39,8 +35,6 @@
     email_address: "{{ kube_credential_email_address }}"
     common_name: "kubeClusteradm"
     subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
-  when:
-   - kube_masters_group in group_names
   become: true
 
 - name: ansible-orchestration | admin-user | Generate an OpenSSL certificate signed with kube CA certificate
@@ -50,50 +44,40 @@
     ownca_path: "{{ kubernetes_certificates_path }}ca.crt"
     ownca_privatekey_path: "{{ kubernetes_certificates_path }}ca.key"
     provider: ownca
-  when:
-   - kube_masters_group in group_names
   become: true
 
-- name: ansible-orchestration | admin-user | create admin account
+- name: ansible-orchestration | admin-user | create kubernetes cluster administrator group file
   ansible.builtin.copy:
-    src: clusteradministrators.yml
-    dest: "/tmp/clusteradministrators.yml"
+    src: "{{ item }}.yml"
+    dest: "/tmp/{{ item }}.yml"
     owner: root
     group: root
     mode: 0640
   become: true
+  loop:
+    - clusteradministrators
+    - cluster-administrators-crb
+    - namespace-creator-cr
+    - namespace-requestors-cr
+    - namespace-creator-crb
+    - namespace-requestor-crb
 
-- name: ansible-orchestration | admin-user | create kubernetes user
+- name: ansible-orchestration | admin-user | create kubernetes cluster administrator group
   kubernetes.core.k8s:
     state: present
-    src: /tmp/clusteradministrators.yml
-  when:
-   - kube_masters_group in group_names
+    src: "/tmp/{{ item }}.yml"
   failed_when: false
   become: true
-
-- name: ansible-orchestration | admin-user | create admin account
-  ansible.builtin.copy:
-    src: cluster-administrators-crb.yml
-    dest: "/tmp/cluster-administrators-crb.yml"
-    owner: root
-    group: root
-    mode: 0640
-  become: true
-
-- name: ansible-orchestration | admin-user | create kubernetes user rights
-  kubernetes.core.k8s:
-    state: present
-    src: /tmp/cluster-administrators-crb.yml
-  when:
-   - kube_masters_group in group_names
-  failed_when: false
-  become: true
+  loop:
+    - clusteradministrators
+    - cluster-administrators-crb
+    - namespace-creator-cr
+    - namespace-requestors-cr
+    - namespace-creator-crb
+    - namespace-requestor-crb
 
 - name: ansible-orchestration | admin-user | configure kubernetes with credentials
   ansible.builtin.command: "kubectl config set-credentials kubeadm --client-key={{ kube_credential_folder }}/kubeadm.pem --client-certificate={{ kube_credential_folder }}/kubeadm.crt"
-  when:
-   - kube_masters_group in group_names
   failed_when: false
   changed_when: False
   become: true
@@ -102,13 +86,9 @@
   ansible.builtin.slurp:
     src: "{{ kube_credential_folder }}/kubeadm.crt"
   register: key
-  when:
-   - kube_masters_group in group_names
   become: true
 
 - name: ansible-orchestration | admin-user | cat kubernetes admin certificates
   ansible.builtin.debug:
     msg: "{{ key['content'] | b64decode }}"
-  when:
-   - kube_masters_group in group_names
   become: true

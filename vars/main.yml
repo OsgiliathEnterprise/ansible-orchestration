@@ -4,3 +4,4 @@
 orchestration:
   group: orchestrationadm
   user: orchestrationadm
+cni: 'flannel'

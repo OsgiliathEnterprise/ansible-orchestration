@@ -18,4 +18,5 @@
   ansible.posix.mount:
     path: "{{ kube_volume.files[0] | map(attribute='path') }}"
     state: absent
+  when: kube_volume.files | length > 0 and kube_volume.files.path | length > 0
   become: Yes

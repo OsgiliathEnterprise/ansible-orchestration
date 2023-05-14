@@ -4,7 +4,7 @@
    - kube_master
   vars:
     secure_logs: False
-    preferred_nic: "eth1"
+    # preferred_nic: "eth1"
     kubernetes_allow_pods_on_master: False
     hostname: "master.osgiliath.test"
     hostname_reboot: false
@@ -21,7 +21,7 @@
    - kube_node
   vars:
     secure_logs: False
-    preferred_nic: "eth1"
+    # preferred_nic: "eth1"
     hostname: "node1.osgiliath.test"
     company_domain: osgiliath.test
     company_realm_password: '123ADMin'

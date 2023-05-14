@@ -1,0 +1,16 @@
+---
+roles:
+  # Install a role from Ansible Galaxy.
+  - name: geerlingguy.swap
+  - name: geerlingguy.containerd
+  - name: mrlesmithjr.manage-lvm
+  - name: robertdebock.bootstrap
+  - name: robertdebock.environment
+  - name: robertdebock.core_dependencies
+  - name: robertdebock.reboot
+  - name: robertdebock.fail2ban
+  - name: robertdebock.epel
+  - name: geerlingguy.ntp
+
+#  - name: tcharl.ansible_orchestration # Circular dep due to orch_cli
+#    source: https://galaxy.ansible.com

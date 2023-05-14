@@ -1,12 +1,12 @@
 ---
-apiVersion: rbac.authorization.k8s.io/v1
+apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
-  name: crbkubeadm
+  name: crbkubeadmcreatens
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: cluster-role-namespace-creator
 subjects:
 - kind: Group
   name: clusterAdministrators

@@ -1,0 +1,38 @@
+---
+
+- name: Cri | activate br_netfilter kernel module
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop:
+    - "overlay"
+    - "br_netfilter"
+  become: true
+
+- name: Cri | activate ip_forward sysctl flag
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+  become: true
+
+- name: Cri | activate bridge nf
+  ansible.posix.sysctl:
+    name: net.bridge.bridge-nf-call-iptables
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+  become: true
+
+- name: Cri | activate bridge-nf-call-ip6tables
+  ansible.posix.sysctl:
+    name: net.bridge.bridge-nf-call-ip6tables
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+  become: true

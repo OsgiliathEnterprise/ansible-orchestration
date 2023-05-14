@@ -1,6 +1,10 @@
 exclude_paths:
  - .cache/
+ - .tox/
  - meta/
  - molecule/
 skip_list:
  - '106'  # Role name {} does not match ``^[a-z][a-z0-9_]+$`` pattern
+warn_list:
+ - name[casing]
+ - no-changed-when

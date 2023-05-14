@@ -1,40 +1,23 @@
 ---
 roles:
   # Install a role from Ansible Galaxy.
-  - name: geerlingguy.kubernetes
-
+  - name: tcharl.kubernetes
   - name: geerlingguy.swap
-
-  - name: geerlingguy.docker
-
+  - name: geerlingguy.containerd
   - name: tcharl.ansible_containerization
-
   - name: tcharl.ansible_volumes
-
   - name: mrlesmithjr.manage-lvm
-
   - name: tcharl.ansible_hostname
-
   - name: tcharl.ansible_nameserver
-
   - name: robertdebock.bootstrap
-
   - name: robertdebock.environment
-
   - name: robertdebock.core_dependencies
-
   - name: robertdebock.reboot
-
   - name: tcharl.ansible_routing
-
   - name: robertdebock.fail2ban
-
   - name: robertdebock.epel
-
   - name: tcharl.ansible_securehost
-
   - name: tcharl.ansible_orchestration_cli
-
   - name: geerlingguy.ntp
 
 #  - name: tcharl.ansible_orchestration # Circular dep due to orch_cli

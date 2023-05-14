@@ -1,8 +1,9 @@
 ---
 dependency:
   name: galaxy
+  enabled: ${DEPENDENCY_ENABLED:-True}
   options:
-    role-file: requirements.yml
+    role-file: ${REQUIREMENTS_PATH:-requirements-standalone.yml}
     roles-path: ${MOLECULE_PROJECT_DIRECTORY}/../community
     requirements-file: requirements-collections.yml
     collections-path: ${MOLECULE_PROJECT_DIRECTORY}/../community-collections
@@ -14,22 +15,22 @@ lint: |
   set -e
   yamllint .
   flake8
-  ANSIBLE_ROLES_PATH=${MOLECULE_PROJECT_DIRECTORY}/..:${MOLECULE_PROJECT_DIRECTORY}/../community:${ANSIBLE_ROLES_PATH} ANSIBLE_COLLECTIONS_PATH=${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${ANSIBLE_COLLECTIONS_PATH} ansible-lint
+  ansible-lint
 platforms:
   - name: master.osgiliath.test
-    box: fedora/35-cloud-base
+    box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
     interfaces:
       - auto_config: true
         network_name: private_network
-        ip: "192.168.50.4"
-        virtualbox__intnet: true
+        type: "dhcp"
+        virtualbox__intnet: "kube_network"
     groups:
       - kube_master
   - name: node1.osgiliath.test
-    box: fedora/35-cloud-base
+    box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
@@ -38,11 +39,12 @@ platforms:
     interfaces:
       - auto_config: true
         network_name: private_network
-        ip: "192.168.50.5"
-        virtualbox__intnet: true
-
+        type: "dhcp"
+        virtualbox__intnet: "kube_network"
 provisioner:
   name: ansible
+  options:
+    vvv: True
 #  config_options:
 #    defaults:
 #      forks: 20
@@ -51,9 +53,6 @@ provisioner:
 #    ssh_connection:
 #      pipelining: true
 #      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
-  env:
-    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/..:${MOLECULE_PROJECT_DIRECTORY}/../community:${ANSIBLE_ROLES_PATH}"
-    ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${ANSIBLE_COLLECTIONS_PATH}"
 verifier:
   name: testinfra
   env:

@@ -15,8 +15,19 @@
 - name: ansible-orchestration | role dependencies
   ansible.builtin.include_tasks: prereq.yml
 
+- name: ansible-orchestration | prepare node for cri
+  ansible.builtin.include_tasks: cri.yml
+
 - name: ansible-orchestration | import network
   ansible.builtin.include_tasks: firewall.yml
+
+- name: ansible-orchestration | nfs persistent-volumes
+  ansible.builtin.include_tasks: nfs-mountpoints.yml
+  when:
+    - nfs_mountpoints is defined
+    - nfs_mountpoints | length > 0
+    - kube_nodes_group in group_names
+    - inventory_hostname == groups[kube_nodes_group][0] # need to configure kubernetes volumes once for all nodes
 
 # - name: ansible-orchestration | delegate kubernetes ca creation to IPA
 #  include_tasks: ipa-certs.yml
@@ -34,19 +45,20 @@
 
 - name: ansible-orchestration | compute kubernetes node group
   ansible.builtin.debug:
-    msg: "{{ 'master' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
+    msg: "{{ 'control_plane' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
   register: kube_node_role
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
 
 - name: ansible-orchestration | include kubernetes role
   ansible.builtin.include_role:
-    name: geerlingguy.kubernetes
+    name: tcharl.kubernetes
   when: (kube_masters_group in group_names) or (kube_nodes_group in group_names)
   vars:
     ansible_become: true
+    kubernetes_version: '1.27'
     kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.netcommon.ipaddr }}"
     kubernetes_pod_network:
-      cni: 'flannel'
+      cni: "{{ cni }}"
       cidr: "{{ kube_cidr }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
@@ -71,19 +83,29 @@
   when: kube_masters_group in group_names
   become: yes
 
+- name: ansible-orchestration | helm
+  ansible.builtin.include_tasks:
+    file: requirements-post-kube-install.yml
+    apply:
+      delegate_to: "{{ groups['kube_master'][0] }}"
+  run_once: True
+
+- name: ansible-orchestration | csi driver
+  ansible.builtin.include_tasks:
+    file: csi-volumes.yml
+    apply:
+      delegate_to: "{{ groups['kube_master'][0] }}"
+  run_once: True
+  when:
+    - nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('csi_mount', 'defined') | selectattr('csi_mount', 'equalto', true)
+
 - name: ansible-orchestration | create admin user
   ansible.builtin.import_tasks: admin-user.yml
+  when:
+    - kube_masters_group in group_names
 
 - name: ansible-orchestration | service-mesh
   ansible.builtin.include_tasks: service-mesh.yml
   when:
    - configure_mesh
    - kube_masters_group in group_names
-
-- name: ansible-orchestration | nfs persistent-volumes
-  ansible.builtin.include_tasks: nfs-mountpoints.yml
-  when:
-    - nfs_mountpoints is defined
-    - nfs_mountpoints | length > 0
-    - kube_nodes_group in group_names
-    - inventory_hostname == groups[kube_nodes_group][0] # need to configure kubernetes volumes once for all nodes

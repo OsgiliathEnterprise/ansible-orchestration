@@ -42,6 +42,10 @@
     release_namespace: istio-system
     create_namespace: true
     kubeconfig: "{{ kube_config_path }}"
+  register: result
+  until: result is succeeded
+  retries: 5
+  delay: 10
   become: Yes
 
 - name: ansible-orchestration | service-mesh | install istio-discovery
@@ -51,6 +55,10 @@
     release_namespace: istio-system
     create_namespace: true
     kubeconfig: "{{ kube_config_path }}"
+  register: result
+  until: result is succeeded
+  retries: 5
+  delay: 10
   become: Yes
 
 - name: ansible-orchestration | service-mesh | install istio-ingress
@@ -60,6 +68,10 @@
     release_namespace: istio-system
     create_namespace: true
     kubeconfig: "{{ kube_config_path }}"
+  register: result
+  until: result is succeeded
+  retries: 5
+  delay: 10
   become: Yes
 
 - name: ansible-orchestration | service-mesh | install istio-egress
@@ -69,4 +81,8 @@
     release_namespace: istio-system
     create_namespace: true
     kubeconfig: "{{ kube_config_path }}"
+  register: result
+  until: result is succeeded
+  retries: 5
+  delay: 10
   become: Yes
