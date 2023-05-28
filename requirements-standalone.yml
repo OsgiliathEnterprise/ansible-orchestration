@@ -4,11 +4,9 @@ roles:
   - name: tcharl.kubernetes
   - name: geerlingguy.swap
   - name: geerlingguy.containerd
-  - name: tcharl.ansible_containerization
   - name: tcharl.ansible_volumes
   - name: mrlesmithjr.manage-lvm
   - name: tcharl.ansible_hostname
-  - name: tcharl.ansible_nameserver
   - name: robertdebock.bootstrap
   - name: robertdebock.environment
   - name: robertdebock.core_dependencies
@@ -16,5 +14,11 @@ roles:
   - name: tcharl.ansible_routing
   - name: robertdebock.fail2ban
   - name: robertdebock.epel
-  - name: tcharl.ansible_securehost
   - name: geerlingguy.ntp
+  - name: tcharl.fail2ban
+  - name: tcharl.etchost_append
+  - name: tcharl.freeipa_server
+  - name: tcharl.ansible_securehost
+  - name: tcharl.ansible_nameserver
+  - name: tcharl.nfs_server
+  - name: tcharl.nfs_client
