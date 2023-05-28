@@ -13,7 +13,7 @@ driver:
     name: virtualbox
 platforms:
   - name: master.osgiliath.test
-    box: fedora/38-cloud-base
+    box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
@@ -26,7 +26,7 @@ platforms:
       - kube_master
       - ipaservers
   - name: node1.osgiliath.test
-    box: fedora/38-cloud-base
+    box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
