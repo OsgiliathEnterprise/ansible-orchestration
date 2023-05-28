@@ -17,8 +17,4 @@ roles:
   - name: robertdebock.fail2ban
   - name: robertdebock.epel
   - name: tcharl.ansible_securehost
-  - name: tcharl.ansible_orchestration_cli
   - name: geerlingguy.ntp
-
-#  - name: tcharl.ansible_orchestration # Circular dep due to orch_cli
-#    source: https://galaxy.ansible.com

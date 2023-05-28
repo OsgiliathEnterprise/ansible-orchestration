@@ -1,0 +1,31 @@
+---
+
+- name: Compute geerlingguy-kubernetes node group
+  ansible.builtin.debug:
+    msg: "{{ 'control_plane' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
+  register: kube_node_role
+
+- name: Install Kubernetes using role
+  ansible.builtin.include_role:
+    name: tcharl.kubernetes
+  vars:
+    ansible_become: true
+    kubernetes_version: "{{ k8s_version }}"
+    kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
+    kubernetes_pod_network:
+      cni: "{{ cni }}"
+      cidr: "{{ kube_cidr }}"
+    kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
+    kubernetes_role: "{{ kube_node_role.msg }}"
+    kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
+    kubernetes_config_cluster_configuration:
+      networking:
+        podSubnet: "{{ kubernetes_pod_network.cidr }}"
+      apiServer:
+        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) }}"
+        extraArgs:
+          authorization-mode: Node,RBAC
+        timeoutForControlPlane: 4m0s
+    kubernetes_config_kubelet_configuration:
+      cgroupDriver: systemd

@@ -1,0 +1,20 @@
+---
+
+- name: Prepare
+  hosts: all
+  tasks:
+    - include_role:
+        name: tcharl.ansible_orchestration
+        tasks_from: requirements.yml
+      vars:
+        secure_logs: False
+        preferred_nic: "eth1"
+        company_domain: osgiliath.test
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+        nfs_mountpoints:
+          - host: master.osgiliath.test
+            mountpoints:
+              - local: /net
+                expose_kube_volume: True
+                mountsize: 1

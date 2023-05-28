@@ -8,6 +8,8 @@
     kube_firewall_zone: 'public'
     standalone_role: False
     reset_kube: True
+  #        kube_alt_names:
+#          - "kubeadm.osgiliath.net"
   roles:
     - role: tcharl.ansible_orchestration
 

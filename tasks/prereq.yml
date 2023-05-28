@@ -1,6 +1,6 @@
 ---
 
-- name: ansible-orchestration | deps | Install needed package
+- name: Prereq | Install needed package
   ansible.builtin.package:
     name:
      - iproute-tc
@@ -10,50 +10,19 @@
     state: present
   become: true
 
-- name: ansible-orchestration | deps | remove unwanted packages
+- name: Prereq | remove unwanted packages
   ansible.builtin.package:
     name:
      - zram-generator-defaults
     state: absent
   become: true
 
-- name: ansible-orchestration-cli | kube-master-tasks | install prereq
+- name: Prereq | install prereq
   ansible.builtin.pip:
     name: kubernetes
   become: true
 
-- name: ansible-orchestration | deps | retreive current machine ip
-  ansible.builtin.setup:
-  register: current_host_facts
-  delegate_facts: true
-
-- name: ansible-orchestration | deps | compute ip if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: current_host_ip
-
-- name: ansible-orchestration | ipa-api-server | get current hostname
-  ansible.builtin.command: "hostname"
-  register: kube_machine_hostname
-  changed_when: false
-
-- name: ansible-orchestration | gather facts on newly created machines
-  ansible.builtin.setup:
-  delegate_facts: true
-  delegate_to: "{{ groups['kube_master'][0] }}"
-  register: masterfacts
-
-- name: ansible-orchestration | get master facts
-  ansible.builtin.debug:
-    var: masterfacts
-    verbosity: 3
-
-- name: ansible-orchestration | compute ip if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: kube_master_ip
-
-- name: ansible-orchestration | ensure swap disabled
+- name: Prereq | ensure swap disabled
   ansible.builtin.command: "swapoff --all"
   changed_when: False
   become: true

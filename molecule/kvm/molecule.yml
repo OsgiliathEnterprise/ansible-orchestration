@@ -11,16 +11,11 @@ driver:
   name: vagrant
   provider:
     name: libvirt
-lint: |
-  set -e
-  yamllint .
-  flake8
-  ansible-lint
 platforms:
   - name: master.osgiliath.test
-    box: fedora/35-cloud-base
+    box: fedora/38-cloud-base
     provider_options:
-      driver: '"kvm"'
+      driver: "kvm"
       cpus: 2
       memory: 2048
       qemu_use_session: false
@@ -28,13 +23,13 @@ platforms:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.4"
-        virtualbox__intnet: true
     groups:
       - kube_master
+      - ipaservers
   - name: node1.osgiliath.test
     box: fedora/35-cloud-base
     provider_options:
-      driver: '"kvm"'
+      driver: "kvm"
       cpus: 2
       memory: 2048
       qemu_use_session: false
@@ -42,7 +37,6 @@ platforms:
       - auto_config: true
         network_name: private_network
         ip: "192.168.50.5"
-        virtualbox__intnet: true
     groups:
       - kube_node
 provisioner:
@@ -53,9 +47,6 @@ provisioner:
 #   ssh_connection:
 #     pipelining: true
 #      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
-  env:
-    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/..:${MOLECULE_PROJECT_DIRECTORY}/../community:${ANSIBLE_ROLES_PATH}"
-    ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${ANSIBLE_COLLECTIONS_PATH}"
 verifier:
   name: testinfra
   env:
@@ -66,14 +57,13 @@ scenario:
   name: kvm
   test_sequence:
     - dependency
-    - lint
     - cleanup
     - destroy
     - syntax
     - create
     - prepare
     - converge
- #   - idempotence
+    # - idempotence
     - side_effect
     - verify
     - cleanup

@@ -1,0 +1,36 @@
+---
+
+- name: Facts | retrieve current machine ip
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+  register: current_host_facts
+  delegate_facts: true
+
+- name: Facts | compute ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: current_host_ip
+
+- name: Facts | get current hostname
+  ansible.builtin.command: "hostname"
+  register: kube_machine_hostname
+  changed_when: false
+
+- name: Facts | gather facts on newly created machines
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+  delegate_facts: true
+  delegate_to: "{{ groups['kube_master'][0] }}"
+  register: masterfacts
+
+- name: Facts | get master facts
+  ansible.builtin.debug:
+    var: masterfacts
+    verbosity: 3
+
+- name: Facts | compute ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: kube_master_ip

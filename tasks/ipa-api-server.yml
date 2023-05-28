@@ -1,5 +1,5 @@
 ---
-- name: ansible-orchestration | ipa-api-server | Check apiserver cert existence
+- name: Ipa-api-server | Check apiserver cert existence
   ansible.builtin.stat:
     path: "{{ kubernetes_certificates_path }}apiserver.crt"
   register: orchestration_apiservercert
@@ -15,7 +15,7 @@
 #  failed_when: False
 #  register: ipa_server_cert_valid
 
-- name: ansible-orchestration | ipa-api-server | ensure dns entry is created
+- name: Ipa-api-server | ensure dns entry is created
   freeipa.ansible_freeipa.ipadnsrecord:
     ipaadmin_password: "{{ company_realm_password }}"
     zone_name: "{{ company_domain }}"
@@ -25,14 +25,14 @@
   no_log: "{{ secure_logs }}"
   delegate_to: "{{ groups[idm_group][0] }}"
 
-- name: ansible-orchestration | ipa-api-server | create apiserver host
+- name: Ipa-api-server | create apiserver host
   freeipa.ansible_freeipa.ipahost:
     ipaadmin_password: "{{ company_realm_password }}"
     name: apiserver.kubernetes.{{ company_domain }}
   no_log: "{{ secure_logs }}"
   delegate_to: "{{ groups[idm_group][0] }}"
 
-- name: ansible-orchestration | ipa-api-server | configure http service
+- name: Ipa-api-server | configure http service
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
     name: "{{ item }}"
@@ -45,7 +45,7 @@
   loop:
    - "HTTP/apiserver.kubernetes.{{ company_domain }}"
 
-- name: ansible-orchestration | ipa-api-server | set apiserver to be managed by current host
+- name: Ipa-api-server | set apiserver to be managed by current host
   freeipa.ansible_freeipa.ipahost:
     ipaadmin_password: "{{ company_realm_password }}"
     hosts:
@@ -55,12 +55,12 @@
   no_log: "{{ secure_logs }}"
   delegate_to: "{{ groups[idm_group][0] }}"
 
-- name: ansible-orchestration | ipa-api-server | create apiserver certs
+- name: Ipa-api-server | create apiserver certs
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}apiserver.key"
   become: true
 
-- name: ansible-orchestration | ipa-api-server | create kube-apiserver csr
+- name: Ipa-api-server | create kube-apiserver csr
   community.crypto.openssl_csr:
     path: "{{ kubernetes_certificates_path }}apiserver.csr"
     privatekey_path: "{{ kubernetes_certificates_path }}apiserver.key"
@@ -88,7 +88,7 @@
 #  when:
 #   - not ipa_group_kubeadm_exists.stdout == '1'
 
-- name: ansible-orchestration | ipa-api-server | find apiserver crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
+- name: Ipa-api-server | find apiserver crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
     ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver.crt --principal HTTP/apiserver.kubernetes.{{ company_domain }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver.csr

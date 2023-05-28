@@ -1,16 +1,16 @@
 ---
 
-- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client certs
+- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client certs
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
   become: true
 
-- name: ansible-orchestration | kube-apiserver-kubelet-client | Check that kube-apiserver-kubelet-client certs exists
+- name: Kube-apiserver-kubelet-client | Check that kube-apiserver-kubelet-client certs exists
   ansible.builtin.stat:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
   register: apiserver_kubelet_client_result
 
-- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client csr
+- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client csr
   community.crypto.openssl_csr:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
     privatekey_path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
@@ -63,13 +63,13 @@
 #  delegate_to: "{{ groups[idm_group][0] }}"
 #  no_log: "{{ secure_logs }}"
 
-- name: ansible-orchestration | kube-apiserver-kubelet-client | Check kube-apiserver-kubelet-client existence
+- name: Kube-apiserver-kubelet-client | Check kube-apiserver-kubelet-client existence
   ansible.builtin.stat:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
   register: orchestration_apiserver_kubelet_client
   become: true
 
-- name: ansible-orchestration | kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
+- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
     ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ hostname | default(kube_machine_hostname.stdout) }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr

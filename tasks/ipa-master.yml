@@ -1,6 +1,6 @@
 ---
 
-- name: ansible-orchestration | ipa-master | configure http service
+- name: Ipa-master | configure http service
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
     name: "{{ item }}"
@@ -13,7 +13,7 @@
   loop:
    - "HTTP/{{ hostname | default(kube_machine_hostname.stdout) }}"
 
-- name: ansible-orchestration | ipa-master | set service to be managed by current host
+- name: Ipa-master | set service to be managed by current host
   freeipa.ansible_freeipa.ipahost:
     ipaadmin_password: "{{ company_realm_password }}"
     hosts:

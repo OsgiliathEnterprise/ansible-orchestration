@@ -1,5 +1,5 @@
 ---
-- name: ansible-orchestration | admin-user | create a kube credential folder
+- name: Admin-user | create a kube credential folder
   ansible.builtin.file:
     state: directory
     dest: "{{ kube_credential_folder }}"
@@ -8,14 +8,14 @@
     group: "root"
   become: true
 
-- name: ansible-orchestration | admin-user | create a kube credential key and store into the first datastore mountpoint
+- name: Admin-user | create a kube credential key and store into the first datastore mountpoint
   community.crypto.openssl_privatekey:
     path: "{{ kube_credential_folder }}/kubeadm.pem"
   when:
    - not kube_credential_key is defined
   become: true
 
-- name: ansible-orchestration | admin-user | create a kube credential key and store into the first datastore mountpoint
+- name: Admin-user | create a kube credential key and store into the first datastore mountpoint
   ansible.builtin.copy:
     dest: "{{ kube_credential_folder }}/kubeadm.pem"
     content: "{{ kube_credential_key }}"
@@ -26,7 +26,7 @@
    - kube_credential_key is defined
   become: true
 
-- name: ansible-orchestration | admin-user | Generate an OpenSSL Certificate Signing Request with Subject information
+- name: Admin-user | Generate an OpenSSL Certificate Signing Request with Subject information
   community.crypto.openssl_csr:
     path: "{{ kube_credential_folder }}/kubeadm.csr"
     privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
@@ -37,7 +37,7 @@
     subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
   become: true
 
-- name: ansible-orchestration | admin-user | Generate an OpenSSL certificate signed with kube CA certificate
+- name: Admin-user | Generate an OpenSSL certificate signed with kube CA certificate
   community.crypto.x509_certificate:
     path: "{{ kube_credential_folder }}/kubeadm.crt"
     csr_path: "{{ kube_credential_folder }}/kubeadm.csr"
@@ -46,7 +46,7 @@
     provider: ownca
   become: true
 
-- name: ansible-orchestration | admin-user | create kubernetes cluster administrator group file
+- name: Admin-user | create kubernetes cluster administrator group file
   ansible.builtin.copy:
     src: "{{ item }}.yml"
     dest: "/tmp/{{ item }}.yml"
@@ -62,7 +62,7 @@
     - namespace-creator-crb
     - namespace-requestor-crb
 
-- name: ansible-orchestration | admin-user | create kubernetes cluster administrator group
+- name: Admin-user | create kubernetes cluster administrator group
   kubernetes.core.k8s:
     state: present
     src: "/tmp/{{ item }}.yml"
@@ -76,19 +76,18 @@
     - namespace-creator-crb
     - namespace-requestor-crb
 
-- name: ansible-orchestration | admin-user | configure kubernetes with credentials
+- name: Admin-user | configure kubernetes with credentials
   ansible.builtin.command: "kubectl config set-credentials kubeadm --client-key={{ kube_credential_folder }}/kubeadm.pem --client-certificate={{ kube_credential_folder }}/kubeadm.crt"
   failed_when: false
   changed_when: False
   become: true
 
-- name: ansible-orchestration | admin-user | cat kubernetes admin certificates
+- name: Admin-user | cat kubernetes admin certificates
   ansible.builtin.slurp:
     src: "{{ kube_credential_folder }}/kubeadm.crt"
   register: key
   become: true
 
-- name: ansible-orchestration | admin-user | cat kubernetes admin certificates
+- name: Admin-user | cat kubernetes admin certificates
   ansible.builtin.debug:
     msg: "{{ key['content'] | b64decode }}"
-  become: true

@@ -11,11 +11,6 @@ driver:
   name: vagrant
   provider:
     name: virtualbox
-lint: |
-  set -e
-  yamllint .
-  flake8
-  ansible-lint
 platforms:
   - name: master.osgiliath.test
     box: ${TESTBOX:-fedora/38-cloud-base}
@@ -23,12 +18,14 @@ platforms:
       cpus: 2
       memory: 2048
     interfaces:
-      - auto_config: true
+      - type: dhcp
+        # ip: "192.168.56.5"
+        auto_config: true
         network_name: private_network
-        type: "dhcp"
-        virtualbox__intnet: "kube_network"
+        virtualbox__intnet: "internalnetwork"
     groups:
       - kube_master
+      - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
@@ -37,10 +34,11 @@ platforms:
     groups:
       - kube_node
     interfaces:
-      - auto_config: true
+      - type: dhcp
+        # ip: "192.168.56.5"
+        auto_config: true
         network_name: private_network
-        type: "dhcp"
-        virtualbox__intnet: "kube_network"
+        virtualbox__intnet: "internalnetwork"
 provisioner:
   name: ansible
   options:
@@ -63,14 +61,13 @@ scenario:
   name: default
   test_sequence:
     - dependency
-    - lint
     - cleanup
     - destroy
     - syntax
     - create
     - prepare
     - converge
- #   - idempotence
+    # - idempotence
     - side_effect
     - verify
     - cleanup

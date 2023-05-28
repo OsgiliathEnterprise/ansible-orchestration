@@ -1,6 +1,6 @@
 ---
 
-- name: ansible-orchestration | csi-volume | install cert-manager
+- name: Requirement-post-kube-install | install cert-manager
   ansible.builtin.include_role:
     name: tcharl.ansible_orchestration_cli
   vars:

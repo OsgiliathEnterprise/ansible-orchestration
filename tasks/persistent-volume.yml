@@ -1,5 +1,5 @@
 ---
-- name: ansible-orchestration | persistent-volume | create temp directory to host template
+- name: Persistent-volume | create temp directory to host template
   changed_when: false
   ansible.builtin.tempfile:
     state: directory
@@ -7,14 +7,14 @@
   delegate_to: "{{ groups['kube_master'][0] }}"
   register: persistent_volumes_temp_directory
 
-- name: ansible-orchestration | persistent-volume | create persistent volume file
+- name: Persistent-volume | create persistent volume file
   ansible.builtin.template:
     src: persistent-volume.yml.j2
     dest: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
     mode: '0600'
   delegate_to: "{{ groups['kube_master'][0] }}"
 
-- name: ansible-orchestration | persistent-volume | execute kubectl apply # TODO replace by CSI storage
+- name: Persistent-volume | execute kubectl apply # TODO replace by CSI storage
   kubernetes.core.k8s:
     state: present
     src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"

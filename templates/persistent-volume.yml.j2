@@ -12,7 +12,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: local-storage
   local:
-    path: {{ nfs_mountpoint.local + kube_volume_to_mount.subtree | default('') }}
+    path: {{ nfs_mountpoint.local + (kube_volume_to_mount.subtree | default('')) }}
   nodeAffinity:
     required:
       nodeSelectorTerms:

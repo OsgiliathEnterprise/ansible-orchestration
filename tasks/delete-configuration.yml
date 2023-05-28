@@ -1,37 +1,13 @@
 ---
 
-- name: ansible-orchestration | kube-destroy | drain nodes
-  ansible.builtin.command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-local-data --force --ignore-daemonsets"
-  become: Yes
-  failed_when: false
-  loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
-  loop_control:
-    loop_var: registeredhost
-  when:
-    - kube_masters_group in group_names
-
-- name: ansible-orchestration | kube-destroy | delete nodes at master level
-  ansible.builtin.command: "kubectl delete node --all"
-  become: Yes
-  failed_when: false
-  when:
-    - kube_masters_group in group_names
-
-- name: ansible-orchestration | kube-destroy | reset kubeadm
-  ansible.builtin.command: "kubeadm reset -f"
-  become: Yes
-  failed_when: false
-  when:
-    - kube_masters_group in group_names
-
-- name: ansible-orchestration | kube-destroy | stop kubelet service
+- name: Delete-configuration | stop kubelet service
   ansible.builtin.service:
     name: kubelet
     state: stopped
   failed_when: false
   become: Yes
 
-- name: ansible-orchestration | kube-destroy | list files
+- name: Delete-configuration | list files
   ansible.builtin.find:
     paths: "/var/lib/kubelet/pods"
     follow: yes
@@ -40,18 +16,18 @@
   register: pod_data_folder_content
   become: Yes
 
-- name: ansible-orchestration | kube-destroy | debug found folders to destroy
+- name: Delete-configuration | debug found folders to destroy
   ansible.builtin.debug:
     msg: "{{ pod_data_folder_content }}"
     verbosity: 3
 
-- name: ansible-orchestration | kube-destroy | iterating over the pods
+- name: Delete-configuration | iterating over the pods
   ansible.builtin.include_tasks: destroy-kubelet-volumes.yml
   loop: "{{ pod_data_folder_content.files | map(attribute='path') }}"
   loop_control:
     loop_var: pod_files
 
-- name: ansible-orchestration | kube-destroy | remove unwanted packages
+- name: Delete-configuration | remove unwanted packages
   ansible.builtin.package:
     name:
      - kubeadm
@@ -91,7 +67,7 @@
 #    builder_cache: yes
 #  become: Yes
 
-- name: ansible-orchestration | kube-destroy | remove kubernetes configuration folder
+- name: Delete-configuration | remove kubernetes configuration folder
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -113,12 +89,12 @@
   failed_when: false
   notify: ansible-orchestration | refresh containerd
 
-- name: ansible-orchestration | kube-destroy | Just force systemd to reread configs (2.4 and above)
+- name: Delete-configuration | Just force systemd to reread configs (2.4 and above)
   ansible.builtin.systemd:
     daemon_reload: yes
   become: Yes
 
-- name: ansible-routing | handler | restart-firewall
+- name: Delete-configuration | restart-firewall
   ansible.builtin.service:
     name: firewalld
     state: restarted

@@ -5,3 +5,10 @@ orchestration:
   group: orchestrationadm
   user: orchestrationadm
 cni: 'flannel'
+kube_masters_group: kube_master
+kube_nodes_group: kube_node
+idm_group: 'ipaservers' # do not change: convention from the ipa roles
+kube_config_folder: "/etc/kubernetes"
+kubernetes_certificates_path: "{{ kube_config_folder }}/pki/"
+kube_config_path: "{{ kube_config_folder }}/admin.conf"
+kube_credential_folder: "/home/kubecreds"

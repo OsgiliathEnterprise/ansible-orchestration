@@ -66,51 +66,10 @@ def test_kubeadm_public_key_exists(host):
     assert '1' in cmd.stdout
 
 
-def test_istio_system_namespace_is_created(host):
-    command = r"""
-    kubectl get ns | \
-    grep -c istio-system"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert '1' in cmd.stdout
-
-
-def test_istio_system_pods_are_configured(host):
-    command = r"""
-    kubectl get pods -n istio-system | \
-    wc -l"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
 def test_volume_is_create(host):
     command = r"""
     kubectl get pv | \
     egrep -c 'net-artefactrepo.*RWX.*Available.*local-storage'"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
-def test_csi_provisioner_hostname_is_created(host):
-    command = """kubectl get ns | grep -c 'hostpath-provisioner'"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
-def test_csi_pod_is_created(host):
-    command = """kubectl get po -n hostpath-provisioner | \
-    grep -c 'hostpath-provisioner-csi'"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
-def test_csi_operator_pod_is_created(host):
-    command = """kubectl get po -n hostpath-provisioner | \
-    grep -c 'hostpath-provisioner-operator'"""
     with host.sudo():
         cmd = host.run(command)
         assert int(cmd.stdout) > 0

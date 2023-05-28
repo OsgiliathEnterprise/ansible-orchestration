@@ -1,43 +1,30 @@
 ---
 - name: Converge master
-  hosts:
-   - kube_master
+  hosts: master.osgiliath.test
   vars:
     secure_logs: False
     preferred_nic: "eth1"
     kubernetes_allow_pods_on_master: False
-    hostname: "master.osgiliath.test"
-    hostname_reboot: false
     kube_firewall_zone: 'public'
-    docker_install_compose: false
-    company_domain: osgiliath.test
-    company_realm_password: '123ADMin'
+    standalone_role: False
     reset_kube: False
   roles:
     - role: tcharl.ansible_orchestration
 
 - name: Converge node
-  hosts:
-   - kube_node
+  hosts: node1.osgiliath.test
   vars:
     secure_logs: False
     preferred_nic: "eth1"
-    hostname: "node1.osgiliath.test"
-    company_domain: osgiliath.test
-    company_realm_password: '123ADMin'
-    hostname_reboot: false
     reset_kube: False
+    standalone_role: False
     kube_firewall_zone: 'public'
-    nfs_mountpoints: # Mountpoints should be configured by the tcharl.ansible_volume (nfs mounts) on the server and client side to be mounted on each node before kubernetes comes in
+    nfs_mountpoints:
       - host: master.osgiliath.test
         mountpoints:
-          - remote: /var/shared/csi
-            local: /net
-            csi_mount: Yes
           - local: /net
-            remote: /var/shared/volume
+            mountsize: 1
             kubernetes_volumes:
-            - subtree: /artefactrepo
-              mountsize: 1
+              - subtree: artefactrepo
   roles:
     - role: tcharl.ansible_orchestration

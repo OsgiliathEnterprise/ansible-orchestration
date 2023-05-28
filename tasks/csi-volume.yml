@@ -1,6 +1,6 @@
 ---
 
-- name: ansible-orchestration | csi-volume | install cert-manager
+- name: Csi-volume | install cert-manager
   kubernetes.core.helm:
     name: cert-manager
     chart_ref: jetstack/cert-manager
@@ -8,7 +8,7 @@
     create_namespace: true
     chart_version: v0.15.0
 
-- name: ansible-orchestration | csi-volume | install csi driver
+- name: Csi-volume | install csi driver
   ansible.builtin.include_role:
     name: tcharl.ansible_orchestration_cli
   vars:
@@ -22,12 +22,12 @@
     descriptor_sets:
       - url: https://github.com/cert-manager/cert-manager/releases/download
         kind: url
-        branch: v1.11.1
+        branch: v1.12.1
         descriptors:
           - path: cert-manager.yaml
       - url: https://github.com/kubevirt/hostpath-provisioner-operator.git
         kind: git
-        branch: v0.15.0
+        branch: v0.16.0
         descriptors:
           - path: deploy/namespace.yaml
             namespace: hostpath-provisioner
@@ -40,25 +40,25 @@
           #- path: deploy/storageclass-wffc.yaml
           #  namespace: hostpath-provisioner
 
-- name: ansible-orchestration | csi-volume | create temp directory to host template
+- name: Csi-volume | create temp directory to host template
   changed_when: false
   ansible.builtin.tempfile:
     state: directory
     suffix: csi
   register: csi_provisionner_temp_directory
 
-- name: ansible-orchestration | csi-volume | deduce host path
+- name: Csi-volume | deduce host path
   ansible.builtin.debug:
     msg: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('csi_mount', 'defined') | selectattr('csi_mount', 'equalto', true) | map(attribute='local') | first }}"
   register: csi_provisionner_host_path
 
-- name: ansible-orchestration | csi-volume | create csi provisionner configuration
+- name: Csi-volume | create csi provisionner configuration
   ansible.builtin.template:
     src: hostpath-csi.yml.j2
     dest: "{{ csi_provisionner_temp_directory.path }}/hostpath-csi.yml"
     mode: '0600'
 
-- name: ansible-orchestration | csi-volume | execute kubectl apply
+- name: Csi-volume | execute kubectl apply
   kubernetes.core.k8s:
     state: present
     src: "{{ csi_provisionner_temp_directory.path }}/hostpath-csi.yml"

@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "tcharl.ansible_orchestration"
+version = "0.1.0"
+description = "Reuses the marvelous geerlingguy's Kubernetes role with some platform's compliant configuration"
+authors = ["Charlie Mordant <cmordant1@gmail.com>"]
+license = "Apache2"
+readme = "README.md"
+include = ["defaults", "files", "handlers", "meta", "tasks", "templates", "vars"]
+packages = [
+    {include = "meta/**/*.py"}
+]
+
+[tool.poetry.dependencies]
+python = ">3.10"
+ansible = "^7.5.0"
+jmespath = "^1.0.1"
+netaddr = "^0.8.0"
+kubernetes = "*"
+
+[tool.poetry.group.dev.dependencies]
+ansible-compat = "*"
+flake8 = "*"
+yamllint = "*"
+pytest-testinfra = "*"
+molecule-plugins = {version = "*", extras = ["vagrant"]}
+ansible-lint = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
