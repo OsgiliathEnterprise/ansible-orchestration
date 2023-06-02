@@ -2,7 +2,6 @@
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'public'
-kube_cidr: "10.244.0.0/16"
 kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
@@ -10,7 +9,6 @@ kube_credential_cn: "Kubernetes administration credential"
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
-configure_mesh: Yes
-istio_version: 1.17.2
 k8s_version: 1.27
 kubernetes_package_version: "{{ k8s_version }}.2"
+calico_version: v3.26.0

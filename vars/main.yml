@@ -4,10 +4,11 @@
 orchestration:
   group: orchestrationadm
   user: orchestrationadm
-cni: 'flannel'
+cni: 'calico'
+kube_cidr: "192.168.0.0/16" # Calico default: no garantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/custom-resources.yaml
 kube_masters_group: kube_master
 kube_nodes_group: kube_node
-idm_group: 'ipaservers' # do not change: convention from the ipa roles
+idm_group: ipaservers
 kube_config_folder: "/etc/kubernetes"
 kubernetes_certificates_path: "{{ kube_config_folder }}/pki/"
 kube_config_path: "{{ kube_config_folder }}/admin.conf"

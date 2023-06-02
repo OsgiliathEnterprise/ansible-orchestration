@@ -45,15 +45,15 @@
     mode: 0755
   become: True
 
-- name: Install kube on control plane
-  ansible.builtin.include_tasks: kube-install.yml
-  when:
-    - kube_masters_group in group_names
+#- name: Install kube on control plane
+#  ansible.builtin.include_tasks: kube-install.yml
+#  when:
+#    - kube_masters_group in group_names
 
 - name: Install kube on node # Executed sequentially: control plane should be executed first
   ansible.builtin.include_tasks: kube-install.yml
-  when:
-    - kube_nodes_group in group_names
+#  when:
+#    - kube_nodes_group in group_names
 
 - name: Give secure permissions to kubernetes admin file
   ansible.builtin.file:

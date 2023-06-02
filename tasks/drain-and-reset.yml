@@ -6,14 +6,12 @@
   failed_when: false
   register: res
   changed_when: res.stdout == "node/{{ hostvars[registeredhost].hostname | default(registeredhost) }} drained"
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
   loop_control:
     loop_var: registeredhost
 
 - name: Drain-and-reset | delete nodes at master level
   ansible.builtin.command: "kubectl delete node --all"
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
   register: res
   changed_when: "'deleted' in res.stdout"
   become: Yes
@@ -23,6 +21,5 @@
   ansible.builtin.command: "kubeadm reset -f"
   register: res
   changed_when: "'[reset]' in res.stdout"
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
   become: Yes
   failed_when: false

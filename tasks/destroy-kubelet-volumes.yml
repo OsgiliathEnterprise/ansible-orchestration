@@ -16,7 +16,10 @@
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:
-    path: "{{ kube_volume.files[0] | map(attribute='path') }}"
+    path: "{{ mounted_volume | map(attribute='path') }}"
     state: absent
+  loop: "{{ kube_volume.files | default([]) | list }}"
+  loop_control:
+    loop_var: mounted_volume
   when: kube_volume.files | length > 0 and kube_volume.files.path | length > 0
   become: Yes

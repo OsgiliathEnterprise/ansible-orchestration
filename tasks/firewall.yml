@@ -19,10 +19,14 @@
             protocol: tcp
           - port: 10250
             protocol: tcp
-          - port: 10251
+          - port: 10259
             protocol: tcp
-          - port: 10252
+          - port: 10257
             protocol: tcp
+          - port: 179
+            protocol: tcp
+          - port: 4789
+            protocol: udp
   when: kube_masters_group in group_names
   tags:
     - dependency
@@ -38,6 +42,10 @@
         enabled_ports:
           - port: 10250
             protocol: tcp
+          - port: 179
+            protocol: tcp
+          - port: 4789
+            protocol: udp
         enabled_port_ranges:
           - port_range: "30000-32767"
             protocol: tcp

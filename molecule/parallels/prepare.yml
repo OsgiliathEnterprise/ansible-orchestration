@@ -1,7 +1,9 @@
 ---
 
 - name: Prepare
-  hosts: all
+  hosts:
+    - kube_master
+    - kube_node
   tasks:
     - include_role:
         name: tcharl.ansible_orchestration

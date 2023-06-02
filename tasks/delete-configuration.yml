@@ -2,9 +2,12 @@
 
 - name: Delete-configuration | stop kubelet service
   ansible.builtin.service:
-    name: kubelet
+    name: "{{ item }}"
     state: stopped
   failed_when: false
+  with_items:
+    - kubelet
+    - containerd
   become: Yes
 
 - name: Delete-configuration | list files
@@ -99,3 +102,13 @@
     name: firewalld
     state: restarted
   become: yes
+
+- name: Delete-configuration | start containerd service
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+  failed_when: false
+  with_items:
+    - containerd
+  become: Yes
+
