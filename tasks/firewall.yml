@@ -1,5 +1,20 @@
 ---
 
+- name: Firewall | NetworkManager configuration for Calico # see https://docs.tigera.io/calico/latest/operations/troubleshoot/troubleshooting#configure-networkmanager
+  ansible.builtin.copy:
+    src: "calico.conf"
+    dest: "/etc/NetworkManager/conf.d/calico.conf"
+    owner: root
+    group: root
+    mode: 0644
+  become: true
+
+- name: Firewall | Restart NetworkManager
+  ansible.builtin.service:
+    name: NetworkManager
+    state: restarted
+  become: true
+
 - name: Firewall | Include firewalld role for masters
   ansible.builtin.include_role:
     name: tcharl.ansible_routing

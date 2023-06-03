@@ -1,0 +1,9 @@
+---
+
+- name: Drain kube
+  ansible.builtin.include_tasks: drain-and-reset.yml
+  when:
+   - kube_masters_group in group_names
+
+- name: Destroying kube
+  ansible.builtin.include_tasks: delete-configuration.yml

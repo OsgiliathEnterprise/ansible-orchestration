@@ -8,14 +8,8 @@
     - standalone
 
 - name: Drain kube
-  ansible.builtin.include_tasks: drain-and-reset.yml
+  ansible.builtin.include_tasks: delete.yml
   run_once: true
-  when:
-   - reset_kube
-   - kube_masters_group in group_names
-
-- name: Destroying kube
-  ansible.builtin.include_tasks: delete-configuration.yml
   when:
    - reset_kube
 
@@ -36,15 +30,6 @@
 #  when:
 #   - kube_masters_group in group_names
 
-- name: Create kubernetes configuration directory
-  ansible.builtin.file:
-    path: "{{ kube_config_folder }}"
-    state: directory
-    owner: root
-    group: root
-    mode: 0755
-  become: True
-
 #- name: Install kube on control plane
 #  ansible.builtin.include_tasks: kube-install.yml
 #  when:
@@ -54,15 +39,6 @@
   ansible.builtin.include_tasks: kube-install.yml
 #  when:
 #    - kube_nodes_group in group_names
-
-- name: Give secure permissions to kubernetes admin file
-  ansible.builtin.file:
-    path: "{{ kube_config_path }}"
-    owner: root
-    group: root
-    mode: '0600'
-  when: kube_masters_group in group_names
-  become: yes
 
 - name: Create local volumes for nfs mount on nodes
   ansible.builtin.include_tasks: nfs-mountpoints.yml

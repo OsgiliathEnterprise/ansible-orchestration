@@ -36,3 +36,13 @@
     state: present
     reload: true
   become: true
+
+- name: Cri | increase conntrack max
+  ansible.posix.sysctl:
+    name: net.netfilter.nf_conntrack_max
+    value: '1000000'
+    sysctl_set: true
+    state: present
+    reload: true
+  failed_when: False # absent on some distro
+  become: true

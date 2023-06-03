@@ -13,7 +13,7 @@ driver:
     name: parallels
 platforms:
   - name: master.osgiliath.test
-    box: ${TESTBOX:-tcharl/fedora-36-aarch64}
+    box: ${TESTBOX:-bento/fedora-38-arm64}
     provider_options:
       cpus: 2
       memory: 5120
@@ -25,7 +25,7 @@ platforms:
       - kube_master
       - ipaservers
   - name: node1.osgiliath.test
-    box: ${TESTBOX:-tcharl/fedora-36-aarch64}
+    box: ${TESTBOX:-bento/fedora-38-arm64}
     provider_options:
       cpus: 2
       memory: 5120
