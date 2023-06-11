@@ -27,11 +27,9 @@
     calico_version: "{{ calico_cni_version }}"
     kubernetes_calico_manifest_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/tigera-operator.yaml"
     kubernetes_calico_configuration_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/custom-resources.yaml"
-    # kubernetes_flannel_manifest_file_rbac: https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel-psp.yml
     kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
-#    kubernetes_kubeadm_init_extra_opts: "--control-plane-endpoint {{ kube_master_ip.msg | ansible.utils.ipaddr }} --apiserver-cert-extra-sans {{ kube_master_ip.msg | ansible.utils.ipaddr }}"
     kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
     kubernetes_config_cluster_configuration:
       networking:

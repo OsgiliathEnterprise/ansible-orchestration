@@ -11,4 +11,4 @@ secure_logs: Yes
 reset_kube: False
 k8s_version: 1.27
 kubernetes_package_version: "{{ k8s_version }}.2"
-calico_version: v3.26.0
+calico_cni_version: v3.26.0
