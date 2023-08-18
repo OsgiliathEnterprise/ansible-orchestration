@@ -15,16 +15,31 @@
     state: restarted
   become: true
 
+#- name: Firewall | Disable firewalld on kubernetes nodes (favor calico network policies)
+#  ansible.builtin.service:
+#    name: firewalld
+#    state: stopped
+#    enabled: no
+#  when: kube_masters_group in group_names or kube_nodes_group in group_names
+#  become: true
+
+# uncomment previous statement, comment the following one and comment the next one to disable firewalld on kubernetes nodes
+
 - name: Firewall | Include firewalld role for masters
   ansible.builtin.include_role:
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
       - name: "{{ kube_firewall_zone }}"
-        enabled_service:
+        enabled_services:
           - service: "ssh"
           - service: "http"
           - service: "https"
+          - service: "bgp"
+          - service: "dns"
+#        enabled_sources:
+          # - source: "{{ kube_cidr }}"
+#          - source: "{{ kube_network.msg }}"
         enabled_ports:
           - port: 6443
             protocol: tcp
@@ -38,10 +53,30 @@
             protocol: tcp
           - port: 10257
             protocol: tcp
-          - port: 179
+          - port: 9153 # coredns metrics
+            protocol: tcp
+            # calico see https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
+          - port: 5473
+            protocol: tcp
+          - port: 9094
             protocol: tcp
           - port: 4789
             protocol: udp
+          - port: 51820
+            protocol: udp
+          - port: 51821
+            protocol: udp
+          # Calico typha authorized ports see https://docs.tigera.io/calico/latest/reference/felix/configuration
+          - port: 68
+            protocol: udp
+          - port: 6666
+            protocol: tcp
+          - port: 6667
+            protocol: tcp
+          - port: 9099
+            protocol: tcp
+          - port: 9091
+            protocol: tcp
   when: kube_masters_group in group_names
   tags:
     - dependency
@@ -52,15 +87,38 @@
   vars:
     firewalld_zones:
       - name: "{{ kube_firewall_zone }}"
-        enabled_service:
+        enabled_services:
           - service: "ssh"
+          - service: "bgp"
+          - service: "https"
+#        enabled_sources:
+          # - source: "{{ kube_cidr }}"
+#          - source: "{{ kube_network.msg }}"
         enabled_ports:
           - port: 10250
             protocol: tcp
-          - port: 179
+          - port: 9153 # coredns metrics
             protocol: tcp
+            # calico see https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
           - port: 4789
             protocol: udp
+          - port: 5473
+            protocol: tcp
+          - port: 51820
+            protocol: udp
+          - port: 51821
+            protocol: udp
+            # Calico authorized ports see https://docs.tigera.io/calico/latest/reference/felix/configuration
+          - port: 68
+            protocol: udp
+          - port: 6666
+            protocol: tcp
+          - port: 6667
+            protocol: tcp
+          - port: 9099
+            protocol: tcp
+          - port: 9091
+            protocol: tcp
         enabled_port_ranges:
           - port_range: "30000-32767"
             protocol: tcp

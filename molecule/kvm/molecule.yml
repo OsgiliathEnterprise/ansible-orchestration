@@ -17,7 +17,7 @@ platforms:
     provider_options:
       driver: "kvm"
       cpus: 2
-      memory: 2048
+      memory: 6144
       qemu_use_session: false
     interfaces:
       - auto_config: true
@@ -25,13 +25,26 @@ platforms:
         ip: "192.168.50.4"
     groups:
       - kube_master
+      - ipaclients
+  - name: ipa.osgiliath.test
+    box: ${TESTBOX:-fedora/38-cloud-base}
+    provider_options:
+      driver: "kvm"
+      cpus: 2
+      memory: 6144
+      qemu_use_session: false
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        ip: "192.168.50.6"
+    groups:
       - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-fedora/38-cloud-base}
     provider_options:
       driver: "kvm"
       cpus: 2
-      memory: 2048
+      memory: 6144
       qemu_use_session: false
     interfaces:
       - auto_config: true
@@ -39,6 +52,7 @@ platforms:
         ip: "192.168.50.5"
     groups:
       - kube_node
+      - ipaclients
 provisioner:
   name: ansible
 #  config_options:

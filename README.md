@@ -10,7 +10,8 @@ Orchestration
 Combines Firewalld, hostname, kubevirt-csi, docker, helm, istio configuration and geerlinguy.kubernetes roles to configure a kubernetes with good security and reasonable defaults (firewall storage and network rules).
 
 Basically, it will configure X master nodes and Y workers.
-You can transform this Kube into a stateful one with the help of the tcharl.ansible_volume role:you'll just have to mount the same NFS mounpoint on all your node and configure the kubevirt-csi driver to get kube storage
+You can transform this Kube into a stateful one with the help of the tcharl.ansible_volume role:you'll just have to mount the same NFS mounpoint on all your node and configure the kubevirt-csi driver to get kube storage.
+
 ```
 mountpoints:
   - remote: /var/shared/csi
@@ -22,6 +23,10 @@ This role will also generate a Kubernetes cluster admin client certificate keypa
 
 Requirements
 ------------
+
+If you are on VMs, these ones should be in a 'Bridge' network mode, NAT or HostOnly will not work (BGP policies will consider IPs to come from the host, which leads to buggy behavior). If you really need NAT, consider tweaking calico BGPPeer configuration (and please contribute back to this role if you find a smart way to do so). 
+
+Bridge configuration is subnetworked/28 by default: the ip adresses of your node should ideally follow each other
 
 Role Variables
 --------------

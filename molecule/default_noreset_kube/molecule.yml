@@ -24,6 +24,18 @@ platforms:
         virtualbox__intnet: true
     groups:
       - kube_master
+      - ipaclients
+  - name: ipa.osgiliath.test
+    box: ${TESTBOX:-fedora/38-cloud-base}
+    provider_options:
+      cpus: 2
+      memory: 2048
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        ip: "192.168.50.6"
+        virtualbox__intnet: true
+    groups:
       - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-fedora/38-cloud-base}
@@ -32,6 +44,7 @@ platforms:
       memory: 2048
     groups:
       - kube_node
+      - ipaclients
     interfaces:
       - auto_config: true
         network_name: private_network

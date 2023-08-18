@@ -1,6 +1,6 @@
 ---
 
-- name: Create kubernetes configuration directory
+- name: Kube-install | Create kubernetes configuration directory
   ansible.builtin.file:
     path: "{{ kube_config_folder }}"
     state: directory
@@ -9,12 +9,50 @@
     mode: 0755
   become: True
 
-- name: Compute geerlingguy-kubernetes node group
+- name: Kube-install | Compute geerlingguy-kubernetes node group
   ansible.builtin.debug:
     msg: "{{ 'control_plane' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
   register: kube_node_role
 
-- name: Install Kubernetes using role
+- name: Kube-install | Create temporary file for Calico configuration
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: calico
+  register: calico_conf_dir
+  become: True
+
+- name: Kube-install | Calico configuration template copy on remote
+  ansible.builtin.template:
+    mode: 0640
+    src: calico_configuration.yml.j2
+    dest: "{{ calico_conf_dir.path }}/calico_configuration.yml"
+  become: True
+
+- name: Kube-install | Compute configuration file
+  ansible.builtin.debug:
+#    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
+    msg: "{{ calico_conf_dir.path + '/calico_configuration.yml' }}"
+  register: calico_configuration_file
+
+- name: Kube-install | Debug kubecidr ip address
+  ansible.builtin.debug:
+#    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
+    msg: "{{ kube_cidr | ansible.utils.next_nth_usable(9) }}"
+    # verbosity: 2
+
+- name: Kube-install | certs sans list
+  ansible.builtin.debug:
+#    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
+    msg: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] | list }}"
+    # verbosity: 2
+
+- name: Kubernetes | Restart systemd-resolved # to be sure that the dns is using ipa
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: restarted
+  become: True
+
+- name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:
     name: tcharl.kubernetes
   vars:
@@ -26,16 +64,16 @@
       cidr: "{{ kube_cidr }}"
     calico_version: "{{ calico_cni_version }}"
     kubernetes_calico_manifest_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/tigera-operator.yaml"
-    kubernetes_calico_configuration_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/custom-resources.yaml"
+    kubernetes_calico_configuration_file: "{{ calico_configuration_file.msg }}"
     kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
     kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
     kubernetes_config_cluster_configuration:
       networking:
-        podSubnet: "{{ kubernetes_pod_network.cidr }}"
+        podSubnet: "{{ kube_cidr }}"
       apiServer:
-        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) }}" # , {{ kube_master_ip.msg | ansible.utils.ipaddr }}
+        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] }}"
         extraArgs:
           authorization-mode: Node,RBAC
         timeoutForControlPlane: 4m0s
@@ -45,12 +83,22 @@
 #          address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
+      resolvConf: /run/systemd/resolve/resolv.conf
+#      clusterDNS:
+#        - "{{ kube_cidr | next_nth_usable(9) }}"
 
-- name: Give secure permissions to kubernetes admin file
+- name: Kube-install | Give secure permissions to kubernetes admin file
   ansible.builtin.file:
     path: "{{ kube_config_path }}"
     owner: root
     group: root
     mode: '0600'
   when: kube_masters_group in group_names
+  become: yes
+
+- name: Kube-install | Restarts coredns after calico installation # needed to fix kubernetes internal dns resolution
+  ansible.builtin.command: "kubectl -n kube-system rollout restart deployment coredns"
+  changed_when: false
+  when: kube_masters_group in group_names
+  delay: 15
   become: yes

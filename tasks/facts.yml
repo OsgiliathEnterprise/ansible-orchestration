@@ -9,7 +9,7 @@
 
 - name: Facts | compute ip if preferred_nic is not set
   ansible.builtin.debug:
-    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic | replace('-', '_')].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
   register: current_host_ip
 
 - name: Facts | get current hostname
@@ -17,12 +17,11 @@
   register: kube_machine_hostname
   changed_when: false
 
-- name: Facts | gather facts on newly created machines
+- name: Facts | gather facts on kube master machine
   ansible.builtin.setup:
     gather_subset:
       - network
-  delegate_facts: true
-  delegate_to: "{{ groups['kube_master'][0] }}"
+  delegate_to: "{{ groups[kube_masters_group][0] }}"
   register: masterfacts
 
 - name: Facts | get master facts
@@ -30,7 +29,29 @@
     var: masterfacts
     verbosity: 3
 
-- name: Facts | compute ip if preferred_nic is not set
+- name: Facts | compute master ip if preferred_nic is not set
   ansible.builtin.debug:
-    msg: "{{ masterfacts.ansible_facts['ansible_' + preferred_nic].ipv4.address if preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    msg: "{{ masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.address if master_preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
   register: kube_master_ip
+
+- name: Facts | compute master network if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ (masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.network | ansible.utils.ipsubnet(masterfacts.ansible_facts['ansible_' + master_preferred_nic].ipv4.prefix)) if master_preferred_nic is defined else ((masterfacts.ansible_facts.ansible_default_ipv4.network | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0])) | ansible.utils.ipsubnet(24)) }}"
+  register: kube_network
+
+- name: Facts | gather facts on idm machine
+  ansible.builtin.setup:
+    gather_subset:
+      - network
+  delegate_to: "{{ groups[idm_group][0] }}"
+  register: idmfacts
+
+- name: Facts | get idm facts
+  ansible.builtin.debug:
+    var: idmfacts
+    verbosity: 3
+
+- name: Facts | compute idm ip if preferred_nic is not set
+  ansible.builtin.debug:
+    msg: "{{ idmfacts.ansible_facts['ansible_' + idm_preferred_nic | replace('-', '_')].ipv4.address if idm_preferred_nic is defined and not idm_preferred_nic.skipped is defined else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+  register: idm_ip

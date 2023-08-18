@@ -3,7 +3,7 @@ roles:
   # Install a role from Ansible Galaxy.
   - name: geerlingguy.swap
   - name: geerlingguy.containerd
-  - name: mrlesmithjr.manage-lvm
+  - name: mrlesmithjr.manage_lvm
   - name: robertdebock.bootstrap
   - name: robertdebock.environment
   - name: robertdebock.core_dependencies

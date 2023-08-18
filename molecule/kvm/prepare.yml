@@ -2,8 +2,7 @@
 
 - name: Prepare
   hosts:
-    - kube_master
-    - kube_node
+    - all
   tasks:
     - include_role:
         name: tcharl.ansible_orchestration
@@ -11,6 +10,7 @@
       vars:
         secure_logs: False
         preferred_nic: "eth1"
+        idm_preferred_nic: "eth1"
         company_domain: osgiliath.test
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'

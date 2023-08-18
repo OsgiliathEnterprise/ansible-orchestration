@@ -2,13 +2,15 @@
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'public'
+kube_firewall_trusted_zone: 'trusted'
 kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
 kube_credential_cn: "Kubernetes administration credential"
+kube_cidr: "192.167.0.0/16" # Calico default: no garantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/custom-resources.yaml
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
 k8s_version: 1.27
-kubernetes_package_version: "{{ k8s_version }}.2"
-calico_cni_version: v3.26.0
+kubernetes_package_version: "{{ k8s_version }}.3"
+calico_cni_version: v3.26.1

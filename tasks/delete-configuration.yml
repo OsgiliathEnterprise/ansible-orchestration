@@ -14,15 +14,14 @@
   ansible.builtin.find:
     paths: "/var/lib/kubelet/pods"
     follow: yes
-    file_type: directory
-    recurse: false
+    file_type: any
+    recurse: True
   register: pod_data_folder_content
   become: Yes
 
 - name: Delete-configuration | debug found folders to destroy
   ansible.builtin.debug:
     msg: "{{ pod_data_folder_content }}"
-    verbosity: 3
 
 - name: Delete-configuration | iterating over the pods
   ansible.builtin.include_tasks: destroy-kubelet-volumes.yml

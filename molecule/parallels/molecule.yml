@@ -23,6 +23,17 @@ platforms:
         network_name: private_network
     groups:
       - kube_master
+      - ipaclients
+  - name: ipa.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-38-arm64}
+    provider_options:
+      cpus: 2
+      memory: 5120
+    interfaces:
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
+    groups:
       - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-38-arm64}
@@ -35,6 +46,7 @@ platforms:
         network_name: private_network
     groups:
       - kube_node
+      - ipaclients
 provisioner:
   name: ansible
 #  config_options:

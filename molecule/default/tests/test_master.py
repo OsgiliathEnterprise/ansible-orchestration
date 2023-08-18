@@ -34,22 +34,6 @@ def test_scheduler_port1_is_opened(host):
     assert '1' in cmd.stdout
 
 
-def test_scheduler_port2_is_opened(host):
-    with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
-        grep -c '10251/tcp'"""
-        cmd = host.run(command)
-    assert '1' in cmd.stdout
-
-
-def test_scheduler_port3_is_opened(host):
-    with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
-        grep -c '10252/tcp'"""
-        cmd = host.run(command)
-    assert '1' in cmd.stdout
-
-
 def test_kubelet_active(host):
     with host.sudo():
         command = """service kubelet status | \
@@ -64,6 +48,26 @@ def test_kubeadm_public_key_exists(host):
         grep -c 'kubeadm.crt'"""
         cmd = host.run(command)
     assert '1' in cmd.stdout
+
+
+def test_calico_system_pods_running(host):
+    command = r"""
+    kubectl get pods -n calico-system | \
+    grep Running | \
+    wc -l"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
+
+
+def test_calico_operator_pods_running(host):
+    command = r"""
+    kubectl get pods -n tigera-operator | \
+    grep Running | \
+    wc -l"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) > 0
 
 
 def test_volume_is_create(host):

@@ -1,11 +1,36 @@
 ---
 
+- name: Drain-and-reset | remove charts with disruption budget (istio-ingress)
+  ansible.builtin.command: "helm delete istio-ingress -n istio-system"
+  become: Yes
+  register: _result
+  changed_when: "'uninstalled' in _result.stdout"
+  failed_when: false
+
+- name: Drain-and-reset | remove charts with disruption budget (istio-egress)
+  ansible.builtin.command: "helm delete istio-egress -n istio-system"
+  become: Yes
+  changed_when: "'uninstalled' in _result.stdout"
+  failed_when: false
+
+- name: Drain-and-reset | remove charts with disruption budget (istiod)
+  ansible.builtin.command: "helm delete istiod -n istio-system"
+  become: Yes
+  changed_when: "'uninstalled' in _result.stdout"
+  failed_when: false
+
+- name: Drain-and-reset | remove charts with disruption budget (istio-base)
+  ansible.builtin.command: "helm delete istio-base -n istio-system"
+  become: Yes
+  changed_when: "'uninstalled' in _result.stdout"
+  failed_when: false
+
 - name: Drain-and-reset | drain nodes
   ansible.builtin.command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-emptydir-data --force --timeout=800s --ignore-daemonsets=true"
   become: Yes
   failed_when: false
   register: res
-  changed_when: res.stdout == "node/{{ hostvars[registeredhost].hostname | default(registeredhost) }} drained"
+  changed_when: res.stdout == "node/" + hostvars[registeredhost].hostname | default(registeredhost) + "drained"
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
   loop_control:
     loop_var: registeredhost

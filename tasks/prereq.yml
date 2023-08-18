@@ -8,6 +8,7 @@
      - python3-pyOpenSSL
      - python3-cryptography
      - wget
+     - bird
     state: present
   become: true
 
@@ -21,6 +22,10 @@
 - name: Prereq | install prereq
   ansible.builtin.pip:
     name: kubernetes
+  retries: 3
+  delay: 5
+  register: result
+  until: result is successful
   become: true
 
 - name: Prereq | ensure swap disabled

@@ -22,7 +22,7 @@
 - name: Prepare node for cri
   ansible.builtin.include_tasks: cri.yml
 
-- name: Configur firewall
+- name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
 
 # - name: ansible-orchestration | delegate kubernetes ca creation to IPA
@@ -39,6 +39,10 @@
   ansible.builtin.include_tasks: kube-install.yml
 #  when:
 #    - kube_nodes_group in group_names
+- name: Firewalld configuration for kube
+  ansible.builtin.include_tasks: kube-firewall.yml
+  when:
+    - kube_masters_group in group_names or kube_nodes_group in group_names
 
 - name: Create local volumes for nfs mount on nodes
   ansible.builtin.include_tasks: nfs-mountpoints.yml
