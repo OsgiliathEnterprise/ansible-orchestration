@@ -22,6 +22,7 @@ platforms:
     interfaces:
       - auto_config: true
         network_name: private_network
+        type: dhcp
 #        ip: "192.168.50.4"
     groups:
       - kube_master
@@ -36,6 +37,7 @@ platforms:
     interfaces:
       - auto_config: true
         network_name: private_network
+        type: dhcp
 #        ip: "192.168.50.6"
     groups:
       - ipaservers
@@ -49,6 +51,7 @@ platforms:
     interfaces:
       - auto_config: true
         network_name: private_network
+        type: dhcp
 #        ip: "192.168.50.5"
     groups:
       - kube_node
