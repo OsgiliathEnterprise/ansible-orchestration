@@ -39,6 +39,7 @@ kubernetes_allow_pods_on_master: False
 hostname: "master.{{ company_domain }}"
 hostname_reboot: false
 kube_firewall_zone: 'public'
+kube_cluster_subnet: <overrode node subnet here if master_node_ip.0/24 is not expected>
 kube_alt_names:
   - "kubeadm.osgiliath.net"
 ```

@@ -36,7 +36,7 @@
 
 - name: Facts | compute master network if preferred_nic is not set
   ansible.builtin.debug:
-    msg: "{{ (masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.network | ansible.utils.ipsubnet(masterfacts.ansible_facts['ansible_' + master_preferred_nic].ipv4.prefix)) if master_preferred_nic is defined else ((masterfacts.ansible_facts.ansible_default_ipv4.network | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0])) | ansible.utils.ipsubnet(24)) }}"
+    msg: "{{ kube_cluster_subnet if kube_cluster_subnet is defined else (masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.network | ansible.utils.ipsubnet(masterfacts.ansible_facts['ansible_' + master_preferred_nic].ipv4.prefix)) if master_preferred_nic is defined else ((masterfacts.ansible_facts.ansible_default_ipv4.network | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0])) | ansible.utils.ipsubnet(24)) }}"
   register: kube_network
 
 - name: Facts | gather facts on idm machine

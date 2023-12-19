@@ -4,7 +4,6 @@
   vars:
     secure_logs: False
     preferred_nic: "eth1"
-    master_preferred_nic: "eth1"
     idm_preferred_nic: "eth1"
     kubernetes_allow_pods_on_master: False
     kube_firewall_zone: 'public'
@@ -19,7 +18,6 @@
     secure_logs: False
     preferred_nic: "eth1"
     master_preferred_nic: "eth1"
-    idm_preferred_nic: "eth1"
     kube_firewall_zone: 'public'
     reset_kube: True
     standalone_role: False

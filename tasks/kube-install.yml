@@ -58,6 +58,11 @@
   vars:
     ansible_become: true
     kubernetes_version: "{{ k8s_version }}"
+    kubernetes_yum_arch: '$basearch'
+    kubernetes_yum_base_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
+    kubernetes_yum_gpg_key:
+      - https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key
+    kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
     kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
     kubernetes_pod_network:
       cni: "{{ cni }}"
@@ -68,7 +73,6 @@
     kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
-    kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
     kubernetes_config_cluster_configuration:
       networking:
         podSubnet: "{{ kube_cidr }}"
