@@ -4,16 +4,14 @@ dependency:
   enabled: ${DEPENDENCY_ENABLED:-True}
   options:
     role-file: ${REQUIREMENTS_PATH:-requirements-standalone.yml}
-    roles-path: ${MOLECULE_PROJECT_DIRECTORY}/../community
     requirements-file: requirements-collections.yml
-    collections-path: ${MOLECULE_PROJECT_DIRECTORY}/../community-collections
 driver:
   name: vagrant
   provider:
     name: virtualbox
 platforms:
   - name: master.osgiliath.test
-    box: ${TESTBOX:-fedora/38-cloud-base}
+    box: ${TESTBOX:-fedora/39-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
@@ -26,7 +24,7 @@ platforms:
       - kube_master
       - ipaclients
   - name: ipa.osgiliath.test
-    box: ${TESTBOX:-fedora/38-cloud-base}
+    box: ${TESTBOX:-fedora/39-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048
@@ -38,7 +36,7 @@ platforms:
     groups:
       - ipaservers
   - name: node1.osgiliath.test
-    box: ${TESTBOX:-fedora/38-cloud-base}
+    box: ${TESTBOX:-fedora/39-cloud-base}
     provider_options:
       cpus: 2
       memory: 2048

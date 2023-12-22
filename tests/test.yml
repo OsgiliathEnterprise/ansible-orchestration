@@ -1,6 +1,0 @@
----
-- name: execute tests
-  hosts: localhost
-  remote_user: root
-  roles:
-    - tcharl.ansible_orchestration
