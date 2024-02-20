@@ -12,5 +12,5 @@ standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
 k8s_version: 1.29
-kubernetes_package_version: "{{ k8s_version }}.0-150500.1.1"
-calico_cni_version: v3.27.0
+kubernetes_package_version: "{{ k8s_version }}.2-150500.1.1"
+calico_cni_version: v3.27.2
