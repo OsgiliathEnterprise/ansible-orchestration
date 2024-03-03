@@ -52,6 +52,11 @@
     state: restarted
   become: True
 
+- name: Kube-install | debug kubernetes package version
+  ansible.builtin.debug:
+    msg: "{{ kubernetes_package_version }}"
+    # verbosity: 2
+
 - name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:
     name: tcharl.kubernetes
