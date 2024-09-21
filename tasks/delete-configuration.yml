@@ -33,6 +33,7 @@
   ansible.builtin.package:
     name:
      - kubeadm
+     - containerd.io
      - kubectl
      - kubelet
      - kubernetes-cni
@@ -77,19 +78,21 @@
   become: Yes
   loop:
     - /etc/cni
+    - /etc/containerd
     - /etc/kubernetes
     - /etc/sysconfig/kubelet
     - /etc/systemd/system/multi-user.target.wants/kubelet.service
     - /root/.kube
     - /usr/lib/etcd
     - /usr/lib/kubelet
+    - /opt/containerd
     - /usr/lib/systemd/system/kubelet.service
     - /usr/lib/systemd/system/kubelet.service.d
     - /var/lib/etcd
     - /var/lib/cni
+    - /var/lib/containerd
     - /var/lib/kubelet
   failed_when: false
-  notify: ansible-orchestration | refresh containerd
 
 - name: Delete-configuration | Just force systemd to reread configs (2.4 and above)
   ansible.builtin.systemd:
@@ -101,6 +104,13 @@
     name: firewalld
     state: restarted
   become: yes
+
+- name: Delete-configuration | reinstall containerd
+  ansible.builtin.include_role:
+    name: geerlingguy.containerd
+  vars:
+    ansible_become: true
+  # notify: ansible-orchestration | refresh containerd
 
 - name: Delete-configuration | start containerd service
   ansible.builtin.service:

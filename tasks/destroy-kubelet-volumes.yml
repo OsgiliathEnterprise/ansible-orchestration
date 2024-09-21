@@ -23,3 +23,23 @@
     loop_var: mounted_volume
   when: kube_volume.files | length > 0 and kube_volume.files.path | length > 0
   become: Yes
+
+- name: Destroy-kubelet-volumes | get volume name
+  ansible.builtin.find:
+    paths: "{{ pod_files }}/volumes/kubernetes.io~projecte"
+    file_type: directory
+    follow: yes
+    recurse: false
+  register: kube_volume_projected
+  become: Yes
+
+- name: Destroy-kubelet-volumes | unmount
+  ansible.posix.mount:
+    path: "{{ mounted_volume | map(attribute='path') }}"
+    state: absent
+  loop: "{{ kube_volume_projected.files | default([]) | list }}"
+  loop_control:
+    loop_var: mounted_volume
+  when: kube_volume_projected.files | length > 0 and kube_volume_projected.files.path | length > 0
+  become: Yes
+

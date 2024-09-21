@@ -84,8 +84,8 @@
       apiServer:
         certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] }}"
         extraArgs:
-          authorization-mode: Node,RBAC
-        timeoutForControlPlane: 4m0s
+          - name: authorization-mode
+            value: Node,RBAC
       controlPlaneEndpoint: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}:6443"
 #      scheduler:
 #        extraArgs:
@@ -110,4 +110,11 @@
   changed_when: false
   when: kube_masters_group in group_names
   delay: 15
+  become: yes
+
+- name: Kube-install | download calicoctl
+  ansible.builtin.get_url:
+    url: "https://github.com/projectcalico/calico/releases/download/{{calico_cni_version}}/calicoctl-linux-{{ calico_arch }}"
+    dest: "/usr/local/bin/kubectl-calico"
+    mode: u=rwx,g=r,o=r
   become: yes
