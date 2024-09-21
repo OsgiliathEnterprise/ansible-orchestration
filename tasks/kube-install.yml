@@ -114,7 +114,7 @@
 
 - name: Kube-install | download calicoctl
   ansible.builtin.get_url:
-    url: "https://github.com/projectcalico/calico/releases/download/{{calico_cni_version}}/calicoctl-linux-{{ calico_arch }}"
+    url: "https://github.com/projectcalico/calico/releases/download/{{ calico_cni_version }}/calicoctl-linux-{{ calico_arch }}"
     dest: "/usr/local/bin/kubectl-calico"
     mode: u=rwx,g=r,o=r
   become: yes

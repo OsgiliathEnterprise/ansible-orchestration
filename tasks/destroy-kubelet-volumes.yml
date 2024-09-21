@@ -42,4 +42,3 @@
     loop_var: mounted_volume
   when: kube_volume_projected.files | length > 0 and kube_volume_projected.files.path | length > 0
   become: Yes
-
