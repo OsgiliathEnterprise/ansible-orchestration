@@ -6,7 +6,7 @@
     state: directory
     owner: root
     group: root
-    mode: 0755
+    mode: '0755'
   become: True
 
 - name: Kube-install | Compute geerlingguy-kubernetes node group
@@ -23,7 +23,7 @@
 
 - name: Kube-install | Calico configuration template copy on remote
   ansible.builtin.template:
-    mode: 0640
+    mode: '0640'
     src: calico_configuration.yml.j2
     dest: "{{ calico_conf_dir.path }}/calico_configuration.yml"
   become: True
@@ -95,7 +95,7 @@
       resolvConf: /run/systemd/resolve/resolv.conf
 #      clusterDNS:
 #        - "{{ kube_cidr | next_nth_usable(9) }}"
-#- name: Kube-install | Create calico operator configmap
+# - name: Kube-install | Create calico operator configmap
 #  kubernetes.core.k8s:
 #    namespace: tigera-operator
 #    definition:

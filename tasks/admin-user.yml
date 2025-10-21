@@ -21,7 +21,7 @@
     content: "{{ kube_credential_key }}"
     owner: "root"
     group: "root"
-    mode: 0600
+    mode: '0600'
   when:
    - kube_credential_key is defined
   become: true
@@ -52,7 +52,7 @@
     dest: "/tmp/{{ item }}.yml"
     owner: root
     group: root
-    mode: 0640
+    mode: '0640'
   become: true
   loop:
     - clusteradministrators

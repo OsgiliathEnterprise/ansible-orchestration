@@ -7,7 +7,7 @@
     replace: 'enable_selinux = true'
   become: True
 
-#- name: Fix Requirements | Enable systemd cgroup
+# - name: Fix Requirements | Enable systemd cgroup
 #  ansible.builtin.replace:
 #    path: /etc/containerd/config.toml
 #    regexp: '(\s*)systemd_cgroup\s*=\s*false'

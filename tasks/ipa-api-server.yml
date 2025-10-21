@@ -5,7 +5,7 @@
   register: orchestration_apiservercert
   become: true
 
-#- name: ansible-orchestration | ipa-api-server | Check that the apiserver.crt exists
+# - name: ansible-orchestration | ipa-api-server | Check that the apiserver.crt exists
 #  shell: |
 #    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
 #    ipa cert-find --ca=kubernetes-ca --subject={{ hostname | default(kube_machine_hostname.stdout) }} --exact | grep -c 'Status: VALID'
@@ -67,8 +67,8 @@
     country_name: "{{ kube_credential_country_name }}"
     organization_name: "{{ company_domain }}"
     email_address: "{{ kube_credential_email_address }}"
-    common_name: "apiserver.kubernetes.{{ company_domain }}"# "api.kubernetes.{{ company_domain }}"
-    subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}" #, 'DNS:api.kubernetes.' + company_domain, 'DNS:kubernetes', 'DNS:kubernetes.default', 'DNS:kubernetes.default.svc', 'DNS:kubernetes.default.svc.cluster', 'DNS:kubernetes.default.svc.cluster.local' (['DNS:'] | product(kube_alt_names | default([])) | map('join') | list | default([])) | flatten | unique
+    common_name: "apiserver.kubernetes.{{ company_domain }}" # "api.kubernetes.{{ company_domain }}"
+    subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}" # 'DNS:api.kubernetes.' + company_domain, 'DNS:kubernetes', 'DNS:kubernetes.default', 'DNS:kubernetes.default.svc', 'DNS:kubernetes.default.svc.cluster', 'DNS:kubernetes.default.svc.cluster.local' (['DNS:'] | product(kube_alt_names | default([])) | map('join') | list | default([])) | flatten | unique
     key_usage:
       - digitalSignature
       - keyEncipherment
@@ -78,7 +78,7 @@
    - not orchestration_apiservercert.stat.exists
   become: true
 
-#- name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
+# - name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
 #  freeipa.ansible_freeipa.ipagroup:
 #    ipaadmin_password: "{{ company_realm_password }}"
 #    name: "kubernetes-administrators"

@@ -3,7 +3,6 @@ namespace: "tcharl"
 name: "ansible_orchestration"
 version: "2.0.1"
 description: "Reuses the marvelous geerlingguy's Kubernetes role with some platform's compliant configuration"
-
 authors:
   - "Charlie Mordant <cmordant1@gmail.com>"
 

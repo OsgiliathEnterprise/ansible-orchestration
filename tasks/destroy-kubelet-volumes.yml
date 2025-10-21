@@ -11,7 +11,7 @@
 - name: Destroy-kubelet-volumes | get volumes name
   ansible.builtin.debug:
     msg: "{{ kube_volume }}"
-    #verbosity: 3
+    verbosity: 3
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:

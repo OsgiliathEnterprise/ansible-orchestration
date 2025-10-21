@@ -17,7 +17,7 @@
     country_name: "{{ kube_credential_country_name }}"
     organization_name: "system:masters"
     email_address: "{{ kube_credential_email_address }}"
-    common_name: "{{ hostname | default(kube_machine_hostname.stdout) }}"# "api.kubernetes.{{ company_domain }}"
+    common_name: "{{ hostname | default(kube_machine_hostname.stdout) }}" # "api.kubernetes.{{ company_domain }}"
     key_usage:
       - digitalSignature
       - keyEncipherment
@@ -26,7 +26,7 @@
   when: not apiserver_kubelet_client_result.stat.exists
   become: true
 
-#- name: ansible-orchestration | ipa-api-server | configure http service
+# - name: ansible-orchestration | ipa-api-server | configure http service
 #  freeipa.ansible_freeipa.ipaservice:
 #    ipaadmin_password: "{{ company_realm_password }}"
 #    name: "{{ item }}"
@@ -43,7 +43,7 @@
 #  loop:
 #   - "HTTP/api.kubernetes.{{ company_domain }}"
 
-#- name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
+# - name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
 #  freeipa.ansible_freeipa.ipagroup:
 #    ipaadmin_password: "{{ company_realm_password }}"
 #    name: "kubernetes-administrators"
@@ -53,7 +53,7 @@
 #  when:
 #   - not ipa_group_kubeadm_exists.stdout == '1'
 
-#- name: ansible-orchestration | ipa-api-server | create dummy host for default SAN
+# - name: ansible-orchestration | ipa-api-server | create dummy host for default SAN
 #  shell: >
 #    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
 #    ipa add-host api.kubernetes.{{ company_domain }} &&

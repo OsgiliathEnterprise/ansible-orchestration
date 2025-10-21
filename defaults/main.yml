@@ -2,7 +2,7 @@
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'public'
-kube_firewall_trusted_zone: "trusted"# TODO 'trusted'
+kube_firewall_trusted_zone: "trusted"
 kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
@@ -17,5 +17,5 @@ secure_logs: Yes
 reset_kube: False
 k8s_version: "1.33" # See compatibility matrix with calico
 kubernetes_package_version: "{{ k8s_version }}.5-150500.1.1"
-calico_cni_version: "v3.30.4" # wait https://github.com/projectcalico/calico/issues/8541 to be solved
+calico_cni_version: "v3.30.4"
 calico_os: "linux"

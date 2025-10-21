@@ -23,6 +23,6 @@
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  failed_when: false #flemme to delete existing volume
+  failed_when: false # TODO flemme to delete existing volume
   delegate_to: "{{ groups['kube_master'][0] }}"
   become: true

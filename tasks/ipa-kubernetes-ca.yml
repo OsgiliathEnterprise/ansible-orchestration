@@ -37,7 +37,7 @@
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa caacl-add kubernetes-ca-acl --hostcat=all --servicecat=all --usercat=all
-  when: #TODO create hostcat and servicecat for better control
+  when: # TODO create hostcat and servicecat for better control
    - not ipa_kubernetes_ca_acl_exists.stdout == '1'
   no_log: "{{ secure_logs }}"
   delegate_to: "{{ groups[idm_group][0] }}"
@@ -75,7 +75,7 @@
   when:
    - not ipa_group_kubeadm_exists.stdout == '1'
 
-#- name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
+# - name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
 #  shell: |
 #    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
 #    ipa caacl-add-user kubernetes-ca-acl --groups=kubernetes-administrators
