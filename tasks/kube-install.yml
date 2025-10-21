@@ -38,13 +38,13 @@
   ansible.builtin.debug:
 #    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
     msg: "{{ kube_cidr | ansible.utils.next_nth_usable(9) }}"
-    # verbosity: 2
+    verbosity: 2
 
 - name: Kube-install | certs sans list
   ansible.builtin.debug:
 #    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
     msg: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] | list }}"
-    # verbosity: 2
+    verbosity: 2
 
 - name: Kubernetes | Restart systemd-resolved # to be sure that the dns is using ipa
   ansible.builtin.service:
@@ -55,7 +55,7 @@
 - name: Kube-install | debug kubernetes package version
   ansible.builtin.debug:
     msg: "{{ kubernetes_package_version }}"
-    # verbosity: 2
+    verbosity: 2
 
 - name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:
@@ -65,15 +65,14 @@
     kubernetes_version: "{{ k8s_version }}"
     kubernetes_yum_arch: '$basearch'
     kubernetes_yum_base_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
-    kubernetes_yum_gpg_key:
-      - https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key
+    kubernetes_yum_gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
     kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
     kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
     kubernetes_pod_network:
-      cni: "{{ cni }}"
+      cni: "{{ kube_cni }}"
       cidr: "{{ kube_cidr }}"
     calico_version: "{{ calico_cni_version }}"
-    kubernetes_calico_manifest_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/tigera-operator.yaml"
+#    kubernetes_calico_manifest_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/tigera-operator.yaml"
     kubernetes_calico_configuration_file: "{{ calico_configuration_file.msg }}"
     kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
@@ -81,6 +80,7 @@
     kubernetes_config_cluster_configuration:
       networking:
         podSubnet: "{{ kube_cidr }}"
+        serviceSubnet: "{{ kube_service_cidr | default('10.96.0.0/12') }}"
       apiServer:
         certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] }}"
         extraArgs:
@@ -95,6 +95,19 @@
       resolvConf: /run/systemd/resolve/resolv.conf
 #      clusterDNS:
 #        - "{{ kube_cidr | next_nth_usable(9) }}"
+#- name: Kube-install | Create calico operator configmap
+#  kubernetes.core.k8s:
+#    namespace: tigera-operator
+#    definition:
+#      apiVersion: v1
+#      kind: ConfigMap
+#      data:
+#        KUBERNETES_SERVICE_HOST: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
+#        KUBERNETES_SERVICE_PORT: '6443'
+#    delegate_to: "{{ groups[kube_masters_group] | first }}"
+#    apply: yes
+#    server_side_apply:
+#      field_manager: ansible
 
 - name: Kube-install | Give secure permissions to kubernetes admin file
   ansible.builtin.file:
@@ -110,11 +123,14 @@
   changed_when: false
   when: kube_masters_group in group_names
   delay: 15
+  register: result
+  until: result is succeeded
+  retries: 5
   become: yes
 
 - name: Kube-install | download calicoctl
   ansible.builtin.get_url:
-    url: "https://github.com/projectcalico/calico/releases/download/{{ calico_cni_version }}/calicoctl-linux-{{ calico_arch }}"
+    url: "https://github.com/projectcalico/calico/releases/download/{{ calico_cni_version }}/calicoctl-{{ calico_os }}-{{ (ansible_facts.architecture == 'aarch64') | ternary('arm64', 'amd64') }}"
     dest: "/usr/local/bin/kubectl-calico"
     mode: u=rwx,g=r,o=r
   become: yes

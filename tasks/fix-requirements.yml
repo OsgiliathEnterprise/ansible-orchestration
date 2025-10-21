@@ -1,0 +1,35 @@
+---
+
+- name: Fix Requirements | Update containerd pause image
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'enable_selinux\s*=\s*false'
+    replace: 'enable_selinux = true'
+  become: True
+
+#- name: Fix Requirements | Enable systemd cgroup
+#  ansible.builtin.replace:
+#    path: /etc/containerd/config.toml
+#    regexp: '(\s*)systemd_cgroup\s*=\s*false'
+#    replace: '\1systemd_cgroup = true'
+#  become: True
+
+- name: Fix Requirements | Enable systemd cgroup
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup\s*=\s*false'
+    replace: 'SystemdCgroup = true'
+  become: True
+
+- name: Fix Update containerd pause image
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'sandbox_image\s*=\s*"registry\.k8s\.io\/pause:3\.8'
+    replace: 'sandbox_image = "registry.k8s.io/pause:3.10'
+  become: True
+
+- name: Fix Ensure containerd is started and enabled at boot.
+  ansible.builtin.service:
+    name: containerd
+    state: restarted
+  become: True

@@ -3,35 +3,44 @@
 - name: Destroy-kubelet-volumes | get volume name
   ansible.builtin.find:
     paths: "{{ pod_files }}/volumes/kubernetes.io~secret"
-    file_type: directory
-    follow: yes
+    file_type: any
     recurse: false
   register: kube_volume
   become: Yes
 
-- name: Destroy-kubelet-volumes | get volume name
+- name: Destroy-kubelet-volumes | get volumes name
   ansible.builtin.debug:
     msg: "{{ kube_volume }}"
-    verbosity: 3
+    #verbosity: 3
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:
     path: "{{ mounted_volume | map(attribute='path') }}"
     state: absent
-  loop: "{{ kube_volume.files | default([]) | list }}"
+  loop: "{{ kube_volume.files | default([]) | list }}" # avoids ansible proxying string when array is one
   loop_control:
     loop_var: mounted_volume
-  when: kube_volume.files | length > 0 and kube_volume.files.path | length > 0
+  when: kube_volume.files | length > 1
+  become: Yes
+
+- name: Destroy-kubelet-volumes | unmount
+  ansible.posix.mount:
+    path: "{{ kube_volume.files[0].path }}"
+    state: absent
+  when: kube_volume.files | length == 1
   become: Yes
 
 - name: Destroy-kubelet-volumes | get volume name
   ansible.builtin.find:
-    paths: "{{ pod_files }}/volumes/kubernetes.io~projecte"
-    file_type: directory
-    follow: yes
+    paths: "{{ pod_files }}/volumes/kubernetes.io~projected"
+    file_type: any
     recurse: false
   register: kube_volume_projected
   become: Yes
+
+- name: Destroy-kubelet-volumes | get projected volumes name
+  ansible.builtin.debug:
+    msg: "{{ kube_volume_projected }}"
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:
@@ -40,5 +49,12 @@
   loop: "{{ kube_volume_projected.files | default([]) | list }}"
   loop_control:
     loop_var: mounted_volume
-  when: kube_volume_projected.files | length > 0 and kube_volume_projected.files.path | length > 0
+  when: kube_volume_projected.files | length > 1
+  become: Yes
+
+- name: Destroy-kubelet-volumes | unmount
+  ansible.posix.mount:
+    path: "{{ kube_volume_projected.files[0].path }}"
+    state: absent
+  when: kube_volume.files | length == 1
   become: Yes

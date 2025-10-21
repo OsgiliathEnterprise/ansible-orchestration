@@ -2,16 +2,20 @@
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'public'
-kube_firewall_trusted_zone: 'trusted'
+kube_firewall_trusted_zone: "trusted"# TODO 'trusted'
 kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
 kube_credential_cn: "Kubernetes administration credential"
-kube_cidr: "192.167.0.0/16" # Calico default: no garantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/custom-resources.yaml
+kube_cni: "calico" # calico or flannel
+kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
+kube_service_cidr: "10.96.0.0/12"
+# kube_cidr: "10.244.0.0/16" # Calico default: no guarantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/custom-resources.yaml
+docker_gpg_key: https://download.docker.com/linux/fedora/gpg
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
-k8s_version: "1.31"
-kubernetes_package_version: "{{ k8s_version }}.1-150500.1.1"
-calico_cni_version: "v3.28.2" # wait https://github.com/projectcalico/calico/issues/8541 to be solved
-calico_arch: "amd64"
+k8s_version: "1.33" # See compatibility matrix with calico
+kubernetes_package_version: "{{ k8s_version }}.5-150500.1.1"
+calico_cni_version: "v3.30.4" # wait https://github.com/projectcalico/calico/issues/8541 to be solved
+calico_os: "linux"

@@ -106,11 +106,7 @@
   become: yes
 
 - name: Delete-configuration | reinstall containerd
-  ansible.builtin.include_role:
-    name: geerlingguy.containerd
-  vars:
-    ansible_become: true
-  # notify: ansible-orchestration | refresh containerd
+  ansible.builtin.include_tasks: snippet_containerd.yml
 
 - name: Delete-configuration | start containerd service
   ansible.builtin.service:

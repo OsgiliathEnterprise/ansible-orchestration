@@ -1,17 +1,24 @@
 ---
 # tasks file for ansible-orchestration
 
-- name: Requirements
-  ansible.builtin.import_tasks: requirements.yml
-  when: standalone_role
-  tags:
-    - standalone
-
 - name: Drain kube
   ansible.builtin.include_tasks: delete.yml
   run_once: true
   when:
    - reset_kube
+
+- name: Requirements
+  ansible.builtin.import_tasks: requirements.yml
+  when:
+   - standalone_role
+   - kube_nodes_group in group_names or kube_masters_group in group_names
+  tags:
+    - standalone
+
+- name: Fix Requirements
+  ansible.builtin.include_tasks: fix-requirements.yml
+  when:
+   - kube_nodes_group in group_names or kube_masters_group in group_names
 
 - name: Install needed packages
   ansible.builtin.import_tasks: prereq.yml
@@ -30,15 +37,11 @@
 #  when:
 #   - kube_masters_group in group_names
 
-#- name: Install kube on control plane
-#  ansible.builtin.include_tasks: kube-install.yml
-#  when:
-#    - kube_masters_group in group_names
-
 - name: Install kube on node # Executed sequentially: control plane should be executed first
   ansible.builtin.include_tasks: kube-install.yml
 #  when:
 #    - kube_nodes_group in group_names
+
 - name: Firewalld configuration for kube
   ansible.builtin.include_tasks: kube-firewall.yml
   when:

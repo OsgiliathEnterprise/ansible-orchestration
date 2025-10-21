@@ -1,9 +1,10 @@
 exclude_paths:
  - .cache/
+ - .github/
+ - .poetry/
  - .tox/
  - meta/
  - molecule/
- - .github/
 skip_list:
  - '106'  # Role name {} does not match ``^[a-z][a-z0-9_]+$`` pattern
 warn_list:

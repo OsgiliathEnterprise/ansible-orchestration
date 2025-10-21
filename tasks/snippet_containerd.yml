@@ -1,0 +1,10 @@
+---
+
+- name: Snippet containerd | reinstall containerd
+  ansible.builtin.include_role:
+    name: geerlingguy.containerd
+  vars:
+    containerd_config_cgroup_driver_systemd: True
+    ansible_become: True
+    docker_yum_gpg_key: "{{ docker_gpg_key }}"
+  # notify: ansible-orchestration | refresh containerd

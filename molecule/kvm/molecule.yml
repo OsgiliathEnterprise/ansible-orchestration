@@ -11,7 +11,7 @@ driver:
     name: libvirt
 platforms:
   - name: master.osgiliath.test
-    box: ${TESTBOX:-fedora/39-cloud-base}
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       driver: "kvm"
       cpus: 2
@@ -25,8 +25,8 @@ platforms:
     groups:
       - kube_master
       - ipaclients
-  - name: ipa.osgiliath.test
-    box: ${TESTBOX:-fedora/39-cloud-base}
+  - name: idm.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       driver: "kvm"
       cpus: 2
@@ -40,7 +40,7 @@ platforms:
     groups:
       - ipaservers
   - name: node1.osgiliath.test
-    box: ${TESTBOX:-fedora/39-cloud-base}
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       driver: "kvm"
       cpus: 2

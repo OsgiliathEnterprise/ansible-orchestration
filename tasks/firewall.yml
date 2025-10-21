@@ -32,13 +32,26 @@
     firewalld_zones:
       - name: "{{ kube_firewall_zone }}"
         enabled_services:
+          - service: "https"
+  when: kube_masters_group in group_names
+  tags:
+    - dependency
+
+- name: Firewall | Include firewalld role for masters
+  ansible.builtin.include_role:
+    name: tcharl.ansible_routing
+  vars:
+    firewalld_zones:
+      - name: "{{ kube_firewall_trusted_zone }}"
+        enabled_services:
           - service: "ssh"
           - service: "http"
           - service: "https"
           - service: "bgp"
           - service: "dns"
-#        enabled_sources:
-          # - source: "{{ kube_cidr }}"
+        enabled_sources:
+          - source: "{{ kube_cidr }}"
+          - source: "{{ kube_service_cidr }}"
 #          - source: "{{ kube_network.msg }}"
         enabled_ports:
           - port: 6443
@@ -77,6 +90,8 @@
             protocol: tcp
           - port: 9091
             protocol: tcp
+          - port: 9098
+            protocol: tcp
   when: kube_masters_group in group_names
   tags:
     - dependency
@@ -86,14 +101,15 @@
     name: tcharl.ansible_routing
   vars:
     firewalld_zones:
-      - name: "{{ kube_firewall_zone }}"
+      - name: "{{ kube_firewall_trusted_zone }}"
         enabled_services:
           - service: "ssh"
           - service: "bgp"
           - service: "https"
-#        enabled_sources:
-          # - source: "{{ kube_cidr }}"
-#          - source: "{{ kube_network.msg }}"
+        enabled_sources:
+          - source: "{{ kube_cidr }}"
+          - source: "{{ kube_service_cidr }}"
+#         - source: "{{ kube_network.msg }}"
         enabled_ports:
           - port: 10250
             protocol: tcp

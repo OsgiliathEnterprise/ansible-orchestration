@@ -53,5 +53,5 @@
 
 - name: Facts | compute idm ip if preferred_nic is not set
   ansible.builtin.debug:
-    msg: "{{ idmfacts.ansible_facts['ansible_' + idm_preferred_nic | replace('-', '_')].ipv4.address if idm_preferred_nic is defined and not idm_preferred_nic.skipped is defined else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    msg: "{{ idmfacts.ansible_facts['ansible_' + idm_preferred_nic | replace('-', '_')].ipv4.address if idm_preferred_nic is defined else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
   register: idm_ip

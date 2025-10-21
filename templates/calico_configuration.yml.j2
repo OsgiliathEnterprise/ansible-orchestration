@@ -7,6 +7,7 @@ metadata:
 spec:
   # Configures Calico networking.
   calicoNetwork:
+    linuxDataplane: Iptables
     # Note: The ipPools section cannot be modified post-install.
     ipPools:
       - blockSize: 26
@@ -14,10 +15,12 @@ spec:
         encapsulation: VXLANCrossSubnet
         natOutgoing: Enabled
         nodeSelector: all()
-{% if idm_preferred_nic is defined %}
+{% if master_preferred_nic is defined %}
+    nodeAddressAutodetectionV4:
+      interface: {{ master_preferred_nic }}
+{% elif idm_preferred_nic is defined %}
     nodeAddressAutodetectionV4:
       canReach: {{ idm_ip.msg}}
-      # interface: {{ idm_preferred_nic }}
 {% endif %}
 ---
 
@@ -28,3 +31,27 @@ kind: APIServer
 metadata:
   name: default
 spec: {}
+
+# This section configures the Calico Gateway API.
+# For more information, see: https://projectcalico.docs.tigera.io/master/reference/installation/api#operator.tigera.io/v1.GatewayAPI
+apiVersion: operator.tigera.io/v1
+kind: GatewayAPI
+metadata:
+  name: default
+spec: {}
+
+---
+
+# Configures the Calico Goldmane flow aggregator.
+apiVersion: operator.tigera.io/v1
+kind: Goldmane
+metadata:
+  name: default
+
+---
+
+# Configures the Calico Whisker observability UI.
+apiVersion: operator.tigera.io/v1
+kind: Whisker
+metadata:
+  name: default

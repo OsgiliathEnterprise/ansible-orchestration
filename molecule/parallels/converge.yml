@@ -1,4 +1,10 @@
 ---
+- name: Debug master
+  hosts: master.osgiliath.test
+  tasks:
+    - ansible.builtin.debug:
+        var: ansible_facts
+
 - name: Converge master
   hosts: master.osgiliath.test
   vars:
@@ -6,10 +12,9 @@
     preferred_nic: "eth1"
     idm_preferred_nic: "eth1"
     master_preferred_nic: "eth1"
-    kubernetes_allow_pods_on_master: False
     kube_firewall_zone: 'public'
-    standalone_role: False
     reset_kube: True
+    standalone_role: False
   #        kube_alt_names:
 #          - "kubeadm.osgiliath.net"
   roles:

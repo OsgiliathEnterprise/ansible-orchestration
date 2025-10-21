@@ -11,20 +11,25 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">3.10"
-ansible = "^9.1.0"
+python = ">=3.11"
+ansible = "^11.5.0"
 jmespath = "^1.0.1"
-netaddr = "^0.8.0"
+netaddr = "^1.3.0"
 kubernetes = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
+tox = "*"
 yamllint = "*"
 pytest-testinfra = "*"
 python-vagrant = "*"
-molecule-plugins = {version = "*", extras = ["vagrant"]}
-ansible-lint = {version = "^v6.22.1", markers = "platform_system != 'Windows'" }
+molecule = "25.1.0"
+molecule-plugins = { version = "23.7.0", extras = ["vagrant"] }
+ansible-lint = { version = "v25.4.0", markers = "platform_system != 'Windows'" }
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.8"

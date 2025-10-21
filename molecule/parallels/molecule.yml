@@ -5,13 +5,14 @@ dependency:
   options:
     role-file: ${REQUIREMENTS_PATH:-requirements-standalone.yml}
     requirements-file: requirements-collections.yml
+    force: true
 driver:
   name: vagrant
   provider:
     name: parallels
 platforms:
   - name: master.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-38-arm64}
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       cpus: 2
       memory: 5120
@@ -22,8 +23,8 @@ platforms:
     groups:
       - kube_master
       - ipaclients
-  - name: ipa.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-38-arm64}
+  - name: idm.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       cpus: 2
       memory: 5120
@@ -34,7 +35,7 @@ platforms:
     groups:
       - ipaservers
   - name: node1.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-38-arm64}
+    box: ${TESTBOX:-bento/fedora-42}
     provider_options:
       cpus: 2
       memory: 5120
@@ -43,8 +44,8 @@ platforms:
         auto_config: true
         network_name: private_network
     groups:
-      - kube_node
       - ipaclients
+      - kube_node
 provisioner:
   name: ansible
 #  config_options:
