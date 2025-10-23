@@ -4,7 +4,7 @@ testinfra_hosts = ["master.osgiliath.test"]
 
 def test_api_server_port_is_opened(host):
     with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
+        command = """firewall-cmd --list-ports --zone=trusted | \
         grep -c '6443/tcp'"""
         cmd = host.run(command)
     assert '1' in cmd.stdout
@@ -12,7 +12,7 @@ def test_api_server_port_is_opened(host):
 
 def test_etcd_port1_is_opened(host):
     with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
+        command = """firewall-cmd --list-ports --zone=trusted | \
         grep -c '2379/tcp'"""
         cmd = host.run(command)
     assert '1' in cmd.stdout
@@ -20,7 +20,7 @@ def test_etcd_port1_is_opened(host):
 
 def test_etcd_port2_is_opened(host):
     with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
+        command = """firewall-cmd --list-ports --zone=trusted | \
         grep -c '2380/tcp'"""
         cmd = host.run(command)
     assert '1' in cmd.stdout
@@ -28,7 +28,7 @@ def test_etcd_port2_is_opened(host):
 
 def test_scheduler_port1_is_opened(host):
     with host.sudo():
-        command = """firewall-cmd --list-ports --zone=public | \
+        command = """firewall-cmd --list-ports --zone=trusted | \
         grep -c '10250/tcp'"""
         cmd = host.run(command)
     assert '1' in cmd.stdout

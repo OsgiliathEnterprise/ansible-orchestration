@@ -1,6 +1,6 @@
 ---
 
-- name: Requirements | import host role
+- name: Requirements | import host role # TODO: no need to install NFS client on the master node.
   ansible.builtin.import_role:
     name: tcharl.nfs_client
 
