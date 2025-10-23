@@ -3,8 +3,9 @@
 - name: Prereq | Install needed package
   ansible.builtin.package:
     name:
-     - iproute-tc
      - python3-pip
+     - python3-packaging
+     - iproute-tc
      - python3-pyOpenSSL
      - python3-cryptography
      - wget

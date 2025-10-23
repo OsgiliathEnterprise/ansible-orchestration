@@ -31,12 +31,15 @@
     reset_kube: True
     standalone_role: False
     nfs_mountpoints:
-      - host: master.osgiliath.test
+      - host: idm.osgiliath.test
         mountpoints:
+          - remote: /var/shared/csi
+            local: /net
+            csi_mount: Yes
           - local: /net
             remote: /var/shared/volume
             kubernetes_volumes:
-              - subtree: artefactrepo
+              - subtree: /artefactrepo
                 mountsize: 1
   roles:
     - role: tcharl.ansible_orchestration
