@@ -11,6 +11,17 @@ driver:
   provider:
     name: parallels
 platforms:
+  - name: idm.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-42}
+    provider_options:
+      cpus: 2
+      memory: 5120
+    interfaces:
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
+    groups:
+      - ipaservers
   - name: master.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:
@@ -23,17 +34,6 @@ platforms:
     groups:
       - kube_master
       - ipaclients
-  - name: idm.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
-    provider_options:
-      cpus: 2
-      memory: 5120
-    interfaces:
-      - type: dhcp
-        auto_config: true
-        network_name: private_network
-    groups:
-      - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:
@@ -48,6 +48,9 @@ platforms:
       - kube_node
 provisioner:
   name: ansible
+  env:
+    MOLECULE_VERBOSITY: 2
+    ANSIBLE_VEBOSITY: 2
 #  config_options:
 #    defaults:
 #      forks: 20

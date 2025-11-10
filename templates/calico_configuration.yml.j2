@@ -20,7 +20,7 @@ spec:
       interface: {{ master_preferred_nic }}
 {% elif idm_preferred_nic is defined %}
     nodeAddressAutodetectionV4:
-      canReach: {{ idm_ip.msg}}
+      canReach: {{ orchestration_idm_ip }}
 {% endif %}
 ---
 

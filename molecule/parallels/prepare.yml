@@ -18,8 +18,16 @@
         company_domain: osgiliath.test
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
-    - import_role:
-        name: tcharl.nfs_server
+    - include_role:
+        name: tcharl.ansible_nameserver
+      vars:
+        standalone_role: False
+        secure_logs: False
+        preferred_nic: "eth1"
+        company_domain: osgiliath.test
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
 - name: Prepare
   hosts:
     - master.osgiliath.test
@@ -30,13 +38,50 @@
       changed_when: false
       become: true
     - include_role:
-        name: tcharl.ansible_orchestration
-        tasks_from: requirements.yml
+        name: tcharl.ansible_securehost
       vars:
+        standalone_role: False
         secure_logs: False
         preferred_nic: "eth1"
-        idm_preferred_nic: "eth1"
-        master_preferred_nic: "eth1"
         company_domain: osgiliath.test
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+    - include_role:
+        name: tcharl.ansible_nameserver
+      vars:
+        standalone_role: False
+        secure_logs: False
+        preferred_nic: "eth1"
+        company_domain: osgiliath.test
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+- name: Prepare NFS server on Master
+  hosts:
+    - master.osgiliath.test
+  tasks:
+    - include_role:
+        name: tcharl.nfs_server
+      vars:
+        standalone_role: False
+        secure_logs: False
+        preferred_nic: "eth1"
+        company_domain: osgiliath.test
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+- name: Prepare NFS client on Node
+  hosts:
+    - node1.osgiliath.test
+  tasks:
+    - include_role:
+        name: tcharl.nfs_client
+      vars:
+        standalone_role: False
+        secure_logs: False
+        preferred_nic: "eth1"
+        company_domain: osgiliath.test
+        idm_preferred_nic: "eth1"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'

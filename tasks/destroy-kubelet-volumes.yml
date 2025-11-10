@@ -41,6 +41,7 @@
 - name: Destroy-kubelet-volumes | get projected volumes name
   ansible.builtin.debug:
     msg: "{{ kube_volume_projected }}"
+    verbosity: 2
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:

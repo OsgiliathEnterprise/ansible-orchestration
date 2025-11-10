@@ -34,7 +34,7 @@
     organization_name: "clusterAdministrators"
     email_address: "{{ kube_credential_email_address }}"
     common_name: "kubeClusteradm"
-    subject_alt_name: "{{ ['DNS:' + (hostname | default(kube_machine_hostname.stdout)), 'IP:' + current_host_ip.msg] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
+    subject_alt_name: "{{ ['DNS:' + (orchestration_host_hostname), 'IP:' + orchestration_host_ip] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
   become: true
 
 - name: Admin-user | Generate an OpenSSL certificate signed with kube CA certificate

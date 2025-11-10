@@ -7,16 +7,6 @@
   register: current_host_facts
   delegate_facts: true
 
-- name: Facts | compute ip if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic | replace('-', '_')].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: current_host_ip
-
-- name: Facts | get current hostname
-  ansible.builtin.command: "hostname"
-  register: kube_machine_hostname
-  changed_when: false
-
 - name: Facts | gather facts on kube master machine
   ansible.builtin.setup:
     gather_subset:
@@ -28,16 +18,6 @@
   ansible.builtin.debug:
     var: masterfacts
     verbosity: 3
-
-- name: Facts | compute master ip if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.address if master_preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: kube_master_ip
-
-- name: Facts | compute master network if preferred_nic is not set
-  ansible.builtin.debug:
-    msg: "{{ kube_cluster_subnet if kube_cluster_subnet is defined else (masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.network | ansible.utils.ipsubnet(masterfacts.ansible_facts['ansible_' + master_preferred_nic].ipv4.prefix)) if master_preferred_nic is defined else ((masterfacts.ansible_facts.ansible_default_ipv4.network | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0])) | ansible.utils.ipsubnet(24)) }}"
-  register: kube_network
 
 - name: Facts | gather facts on idm machine
   ansible.builtin.setup:
@@ -51,7 +31,40 @@
     var: idmfacts
     verbosity: 3
 
-- name: Facts | compute idm ip if preferred_nic is not set
+- name: Facts | get current hostname
+  ansible.builtin.command: "hostname"
+  register: kube_machine_hostname
+  changed_when: false
+
+- name: Facts | compute ip if preferred_nic is not set
+  ansible.builtin.set_fact:
+    orchestration_host_ip: "{{ current_host_facts.ansible_facts['ansible_' + preferred_nic | replace('-', '_')].ipv4.address if preferred_nic is defined else current_host_facts.ansible_facts.ansible_default_ipv4.address | default(current_host_facts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    orchestration_host_hostname: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+    orchestration_master_ip: "{{ masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.address if master_preferred_nic is defined else masterfacts.ansible_facts.ansible_default_ipv4.address | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+    orchestration_controlplane_node_network: "{{ kube_cluster_subnet if kube_cluster_subnet is defined else (masterfacts.ansible_facts['ansible_' + master_preferred_nic | replace('-', '_')].ipv4.network | ansible.utils.ipsubnet(masterfacts.ansible_facts['ansible_' + master_preferred_nic].ipv4.prefix)) if master_preferred_nic is defined else ((masterfacts.ansible_facts.ansible_default_ipv4.network | default(masterfacts.ansible_facts.ansible_all_ipv4_addresses[0])) | ansible.utils.ipsubnet(24)) }}"
+    orchestration_idm_ip: "{{ idmfacts.ansible_facts['ansible_' + idm_preferred_nic | replace('-', '_')].ipv4.address if idm_preferred_nic is defined else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
+
+- name: Facts | Current host ip
   ansible.builtin.debug:
-    msg: "{{ idmfacts.ansible_facts['ansible_' + idm_preferred_nic | replace('-', '_')].ipv4.address if idm_preferred_nic is defined else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}"
-  register: idm_ip
+    msg: "{{ orchestration_host_ip }}"
+    verbosity: 1
+
+- name: Facts | Current host hostname
+  ansible.builtin.debug:
+    msg: "{{ orchestration_host_hostname }}"
+    verbosity: 1
+
+- name: Facts | Control plane ip
+  ansible.builtin.debug:
+    msg: "{{ orchestration_master_ip }}"
+    verbosity: 1
+
+- name: Facts | Control plane node network
+  ansible.builtin.debug:
+    msg: "{{ orchestration_controlplane_node_network }}"
+    verbosity: 1
+
+- name: Facts | IDM ip
+  ansible.builtin.debug:
+    msg: orchestration_idm_ip
+    verbosity: 1

@@ -25,6 +25,17 @@
 
 # uncomment previous statement, comment the following one and comment the next one to disable firewalld on kubernetes nodes
 
+- name: Firewall | Add node to Sourced trusted zone on masters
+  ansible.posix.firewalld:
+    zone: "{{ kube_firewall_trusted_zone }}"
+    permanent: true
+    immediate: true
+    source: "{{ orchestration_host_ip }}"
+    state: enabled
+  become: True
+  delegate_to: "{{ groups[kube_masters_group][0] }}"
+  when: kube_nodes_group in group_names
+
 - name: Firewall | Include firewalld role for masters
   ansible.builtin.include_role:
     name: tcharl.ansible_routing
@@ -52,7 +63,7 @@
         enabled_sources:
           - source: "{{ kube_cidr }}"
           - source: "{{ kube_service_cidr }}"
-#          - source: "{{ kube_network.msg }}"
+#          - source: "{{ orchestration_controlplane_node_network }}"
         enabled_ports:
           - port: 6443
             protocol: tcp
@@ -109,7 +120,7 @@
         enabled_sources:
           - source: "{{ kube_cidr }}"
           - source: "{{ kube_service_cidr }}"
-#         - source: "{{ kube_network.msg }}"
+#         - source: "{{ orchestration_controlplane_node_network }}"
         enabled_ports:
           - port: 10250
             protocol: tcp
@@ -141,3 +152,4 @@
   when: kube_nodes_group in group_names
   tags:
     - dependency
+

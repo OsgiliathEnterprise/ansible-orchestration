@@ -1,17 +1,11 @@
 ---
 
-- name: Requirements | import host role # TODO: no need to install NFS client on the master node.
-  ansible.builtin.import_role:
-    name: tcharl.nfs_client
-  when:
-   - kube_nodes_group in group_names
-
 - name: Requirements | import swap role
-  ansible.builtin.include_role:
+  ansible.builtin.import_role:
     name: geerlingguy.swap
   vars:
     swap_file_state: absent
     ansible_become: True
 
 - name: Requirements | import containerd role
-  ansible.builtin.include_tasks: snippet_containerd.yml
+  ansible.builtin.import_tasks: snippet_containerd.yml

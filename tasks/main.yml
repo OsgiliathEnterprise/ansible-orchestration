@@ -9,11 +9,6 @@
 
 - name: Requirements
   ansible.builtin.import_tasks: requirements.yml
-  when:
-   - standalone_role
-   - kube_nodes_group in group_names or kube_masters_group in group_names
-  tags:
-    - standalone
 
 - name: Fix Requirements
   ansible.builtin.include_tasks: fix-requirements.yml

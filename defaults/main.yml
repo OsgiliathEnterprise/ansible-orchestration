@@ -1,7 +1,7 @@
 ---
 # defaults file for ansible-orchestration
 kubernetes_allow_pods_on_master: False
-kube_firewall_zone: 'public'
+kube_firewall_zone: 'internal'
 kube_firewall_trusted_zone: "trusted"
 kube_credential_country_name: "FR"
 kube_credential_organization_name: "Osgiliath"

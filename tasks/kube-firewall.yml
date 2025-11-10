@@ -2,7 +2,7 @@
 
 - name: Kube-Firewall | add kube nodes cidr to trusted zone
   ansible.posix.firewalld:
-    source: "{{ kube_network.msg }}"
+    source: "{{ orchestration_controlplane_node_network }}"
     zone: "{{ kube_firewall_trusted_zone }}"
     state: enabled
     immediate: true
@@ -11,7 +11,7 @@
 
 - name: Kube-Firewall | add kube pod cidr to trusted zone
   ansible.posix.firewalld:
-    source: "{{ current_host_ip.msg }}"
+    source: "{{ orchestration_host_ip }}"
     zone: "{{ kube_firewall_trusted_zone }}"
     state: enabled
     immediate: true

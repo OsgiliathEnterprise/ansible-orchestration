@@ -43,7 +43,7 @@
 - name: Kube-install | certs sans list
   ansible.builtin.debug:
 #    msg: "{{ 'https://raw.githubusercontent.com/projectcalico/calico/' + calico_cni_version + '/manifests/custom-resources.yaml' }}"
-    msg: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] | list }}"
+    msg: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [orchestration_master_ip | ansible.utils.ipaddr] | list }}"
     verbosity: 2
 
 - name: Kubernetes | Restart systemd-resolved # to be sure that the dns is using ipa
@@ -67,7 +67,7 @@
     kubernetes_yum_base_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
     kubernetes_yum_gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
     kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
-    kubernetes_apiserver_advertise_address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
+    kubernetes_apiserver_advertise_address: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
     kubernetes_pod_network:
       cni: "{{ kube_cni }}"
       cidr: "{{ kube_cidr }}"
@@ -82,14 +82,14 @@
         podSubnet: "{{ kube_cidr }}"
         serviceSubnet: "{{ kube_service_cidr | default('10.96.0.0/12') }}"
       apiServer:
-        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [kube_master_ip.msg | ansible.utils.ipaddr] }}"
+        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [orchestration_master_ip | ansible.utils.ipaddr] }}"
         extraArgs:
           - name: authorization-mode
             value: Node,RBAC
-      controlPlaneEndpoint: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}:6443"
+      controlPlaneEndpoint: "{{ orchestration_master_ip | ansible.utils.ipaddr }}:6443"
 #      scheduler:
 #        extraArgs:
-#          address: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
+#          address: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
       resolvConf: /run/systemd/resolve/resolv.conf
@@ -102,7 +102,7 @@
 #      apiVersion: v1
 #      kind: ConfigMap
 #      data:
-#        KUBERNETES_SERVICE_HOST: "{{ kube_master_ip.msg | ansible.utils.ipaddr }}"
+#        KUBERNETES_SERVICE_HOST: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
 #        KUBERNETES_SERVICE_PORT: '6443'
 #    delegate_to: "{{ groups[kube_masters_group] | first }}"
 #    apply: yes

@@ -10,6 +10,18 @@ driver:
   provider:
     name: virtualbox
 platforms:
+  - name: idm.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-42}
+    provider_options:
+      cpus: 2
+      memory: 2048
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        ip: "192.168.50.6"
+        virtualbox__intnet: true
+    groups:
+      - ipaservers
   - name: master.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:
@@ -23,18 +35,6 @@ platforms:
     groups:
       - kube_master
       - ipaclients
-  - name: idm.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
-    provider_options:
-      cpus: 2
-      memory: 2048
-    interfaces:
-      - auto_config: true
-        network_name: private_network
-        ip: "192.168.50.6"
-        virtualbox__intnet: true
-    groups:
-      - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:

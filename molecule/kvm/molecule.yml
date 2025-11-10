@@ -10,6 +10,20 @@ driver:
   provider:
     name: libvirt
 platforms:
+  - name: idm.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-42}
+    provider_options:
+      driver: "kvm"
+      cpus: 2
+      memory: 3000
+      qemu_use_session: false
+    interfaces:
+      - auto_config: true
+        network_name: private_network
+        type: dhcp
+#        ip: "192.168.50.6"
+    groups:
+      - ipaservers
   - name: master.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:
@@ -25,20 +39,6 @@ platforms:
     groups:
       - kube_master
       - ipaclients
-  - name: idm.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
-    provider_options:
-      driver: "kvm"
-      cpus: 2
-      memory: 3000
-      qemu_use_session: false
-    interfaces:
-      - auto_config: true
-        network_name: private_network
-        type: dhcp
-#        ip: "192.168.50.6"
-    groups:
-      - ipaservers
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:
@@ -52,8 +52,8 @@ platforms:
         type: dhcp
 #        ip: "192.168.50.5"
     groups:
-      - kube_node
       - ipaclients
+      - kube_node
 provisioner:
   name: ansible
 #  config_options:

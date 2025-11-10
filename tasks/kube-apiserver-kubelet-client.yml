@@ -17,7 +17,7 @@
     country_name: "{{ kube_credential_country_name }}"
     organization_name: "system:masters"
     email_address: "{{ kube_credential_email_address }}"
-    common_name: "{{ hostname | default(kube_machine_hostname.stdout) }}" # "api.kubernetes.{{ company_domain }}"
+    common_name: "{{ orchestration_host_hostname }}" # "api.kubernetes.{{ company_domain }}"
     key_usage:
       - digitalSignature
       - keyEncipherment
@@ -30,13 +30,13 @@
 #  freeipa.ansible_freeipa.ipaservice:
 #    ipaadmin_password: "{{ company_realm_password }}"
 #    name: "{{ item }}"
-#    host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
+#    host: "{{ orchestration_host_hostname }}"
 #    allow_create_keytab_group:
 #      - admins
 #    allow_retrieve_keytab_group:
 #      - admins
-#    allow_retrieve_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}"
-#    allow_create_keytab_host: "{{ hostname | default(kube_machine_hostname.stdout) }}" # TODO create kubernetes master group
+#    allow_retrieve_keytab_host: "{{ orchestration_host_hostname }}"
+#    allow_create_keytab_host: "{{ orchestration_host_hostname }}" # TODO create kubernetes master group
 #    skip_host_check: True
 #  delegate_to: "{{ groups[idm_group][0] }}"
 #  no_log: "{{ secure_logs }}"
@@ -57,7 +57,7 @@
 #  shell: >
 #    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
 #    ipa add-host api.kubernetes.{{ company_domain }} &&
-#    ipa host-add-managedby api.kubernetes.{{ company_domain }} --hosts={{ hostname | default(kube_machine_hostname.stdout) }}
+#    ipa host-add-managedby api.kubernetes.{{ company_domain }} --hosts={{ orchestration_host_hostname }}
 #  failed_when: False
 #  changed_when: False
 #  delegate_to: "{{ groups[idm_group][0] }}"
@@ -69,10 +69,10 @@
   register: orchestration_apiserver_kubelet_client
   become: true
 
-- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ hostname | default(kube_machine_hostname.stdout) }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
+- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ orchestration_host_hostname }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
-    ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ hostname | default(kube_machine_hostname.stdout) }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr
+    ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ orchestration_host_hostname }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr
   when:
    - not orchestration_apiserver_kubelet_client.stat.exists
   no_log: "{{ secure_logs }}"

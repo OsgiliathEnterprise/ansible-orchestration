@@ -1,7 +1,7 @@
 ---
 
 - name: Snippet containerd | reinstall containerd
-  ansible.builtin.include_role:
+  ansible.builtin.import_role:
     name: geerlingguy.containerd
   vars:
     containerd_config_cgroup_driver_systemd: True
