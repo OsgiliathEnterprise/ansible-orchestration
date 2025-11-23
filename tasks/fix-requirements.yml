@@ -17,8 +17,23 @@
 - name: Fix Requirements | Enable systemd cgroup
   ansible.builtin.replace:
     path: /etc/containerd/config.toml
-    regexp: 'SystemdCgroup\s*=\s*false'
-    replace: 'SystemdCgroup = true'
+    regexp: '^\s+SystemdCgroup\s*=\s*false'
+    replace: '# SystemdCgroup = false'
+  become: True
+
+- name: Fix Requirements | Disable apparmor
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: '^\s+disable_apparmor\s*=\s*false'
+    replace: 'disable_apparmor = true'
+  become: True
+
+- name: Fix Requirements | Add systemd cgroup if line not present
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup\s=\strue'
+    insertafter: '\.containerd\.runtimes\.runc\.options'
+    line: "{{ 'SystemdCgroup = true' | indent(width=12, first=True) }}"
   become: True
 
 - name: Fix Update containerd pause image

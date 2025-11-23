@@ -75,8 +75,8 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-    recurse: yes
-  become: Yes
+    recurse: true
+  become: true
   loop:
     - /etc/cni
     - /etc/containerd
@@ -98,22 +98,10 @@
 - name: Delete-configuration | Just force systemd to reread configs (2.4 and above)
   ansible.builtin.systemd:
     daemon_reload: yes
-  become: Yes
+  become: true
 
 - name: Delete-configuration | restart-firewall
   ansible.builtin.service:
     name: firewalld
     state: restarted
-  become: yes
-
-- name: Delete-configuration | reinstall containerd
-  ansible.builtin.include_tasks: snippet_containerd.yml
-
-- name: Delete-configuration | start containerd service
-  ansible.builtin.service:
-    name: "{{ item }}"
-    state: started
-  failed_when: false
-  with_items:
-    - containerd
-  become: Yes
+  become: true

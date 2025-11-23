@@ -123,6 +123,7 @@
   changed_when: false
   when: kube_masters_group in group_names
   delay: 15
+  failed_when: false
   register: result
   until: result is succeeded
   retries: 5

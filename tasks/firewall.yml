@@ -36,6 +36,17 @@
   delegate_to: "{{ groups[kube_masters_group][0] }}"
   when: kube_nodes_group in group_names
 
+
+- name: Firewall | Add master to Sourced trusted zone on node
+  ansible.posix.firewalld:
+    zone: "{{ kube_firewall_trusted_zone }}"
+    permanent: true
+    immediate: true
+    source: "{{ orchestration_master_ip }}"
+    state: enabled
+  become: True
+  when: kube_nodes_group in group_names or kube_masters_group in group_names
+
 - name: Firewall | Include firewalld role for masters
   ansible.builtin.include_role:
     name: tcharl.ansible_routing
@@ -44,6 +55,9 @@
       - name: "{{ kube_firewall_zone }}"
         enabled_services:
           - service: "https"
+        enabled_ports:
+          - port: 6443
+            protocol: tcp
   when: kube_masters_group in group_names
   tags:
     - dependency
@@ -123,6 +137,8 @@
 #         - source: "{{ orchestration_controlplane_node_network }}"
         enabled_ports:
           - port: 10250
+            protocol: tcp
+          - port: 10256
             protocol: tcp
           - port: 9153 # coredns metrics
             protocol: tcp

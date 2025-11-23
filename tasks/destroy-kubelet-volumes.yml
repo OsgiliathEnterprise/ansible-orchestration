@@ -2,7 +2,7 @@
 
 - name: Destroy-kubelet-volumes | get volume name
   ansible.builtin.find:
-    paths: "{{ pod_files }}/volumes/kubernetes.io~secret"
+    paths: "{{ pod_files }}/volumes"
     file_type: any
     recurse: false
   register: kube_volume
@@ -30,32 +30,3 @@
   when: kube_volume.files | length == 1
   become: Yes
 
-- name: Destroy-kubelet-volumes | get volume name
-  ansible.builtin.find:
-    paths: "{{ pod_files }}/volumes/kubernetes.io~projected"
-    file_type: any
-    recurse: false
-  register: kube_volume_projected
-  become: Yes
-
-- name: Destroy-kubelet-volumes | get projected volumes name
-  ansible.builtin.debug:
-    msg: "{{ kube_volume_projected }}"
-    verbosity: 2
-
-- name: Destroy-kubelet-volumes | unmount
-  ansible.posix.mount:
-    path: "{{ mounted_volume | map(attribute='path') }}"
-    state: absent
-  loop: "{{ kube_volume_projected.files | default([]) | list }}"
-  loop_control:
-    loop_var: mounted_volume
-  when: kube_volume_projected.files | length > 1
-  become: Yes
-
-- name: Destroy-kubelet-volumes | unmount
-  ansible.posix.mount:
-    path: "{{ kube_volume_projected.files[0].path }}"
-    state: absent
-  when: kube_volume.files | length == 1
-  become: Yes

@@ -34,3 +34,9 @@
   ansible.builtin.command: "swapoff --all"
   changed_when: False
   become: true
+
+- name: Prereq | Put SELinux in permissive mode, logging actions that would be blocked.
+  ansible.posix.selinux:
+    policy: targeted
+    state: permissive
+  become: true

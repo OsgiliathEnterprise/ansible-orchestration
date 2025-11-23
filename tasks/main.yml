@@ -3,7 +3,6 @@
 
 - name: Drain kube
   ansible.builtin.include_tasks: delete.yml
-  run_once: true
   when:
    - reset_kube
 
