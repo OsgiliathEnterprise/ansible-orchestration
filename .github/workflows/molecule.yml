@@ -21,10 +21,10 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
         with:
-          path: tcharl.nfs_client
+          path: tcharl.ansible_orchestration
       - name: install prereq
         run: |
-          cd tcharl.nfs_client
+          cd tcharl.ansible_orchestration
           ansible-galaxy role install -r requirements-standalone.yml
           ansible-galaxy collection install -r requirements-collections.yml
   lint:
