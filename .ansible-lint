@@ -7,8 +7,8 @@ exclude_paths:
  - molecule/
 skip_list:
  - '106'  # Role name {} does not match ``^[a-z][a-z0-9_]+$`` pattern
+ - galaxy[no-changelog]
 warn_list:
  - name[casing]
  - no-changed-when
  - var-naming[no-role-prefix]
- - galaxy[no-changelog]  # Role does not have a valid CHANGELOG.md file

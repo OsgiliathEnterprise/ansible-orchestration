@@ -29,4 +29,3 @@
     state: absent
   when: kube_volume.files | length == 1
   become: Yes
-

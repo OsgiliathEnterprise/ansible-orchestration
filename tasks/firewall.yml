@@ -168,4 +168,3 @@
   when: kube_nodes_group in group_names
   tags:
     - dependency
-
