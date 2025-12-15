@@ -48,5 +48,5 @@ jobs:
           pip3 install wheel setuptools tox
       - name: tox lint
         run: |
-          cd tcharl.nfs_client
+          cd tcharl.ansible_orchestration
           tox -e lint
