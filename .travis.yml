@@ -42,7 +42,7 @@ script:
   - mv ../ansible-orchestration ../tcharl.ansible_orchestration
   - ansible-galaxy role install -r requirements-standalone.yml
   - ansible-galaxy collection install -r requirements-collections.yml
-  - travis_wait 50 tox -e test-exec -- --scenario-name kvm
+  - travis_wait 120 tox -e test-exec -- --scenario-name kvm
 branches:
   only:
     - master
