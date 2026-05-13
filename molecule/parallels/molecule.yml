@@ -32,8 +32,8 @@ platforms:
         auto_config: true
         network_name: private_network
     groups:
-      - kube_master
       - ipaclients
+      - kube_master
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-42}
     provider_options:

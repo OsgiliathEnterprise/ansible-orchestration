@@ -35,8 +35,8 @@ platforms:
         network_name: private_network
         virtualbox__intnet: "internalnetwork"
     groups:
-      - kube_master
       - ipaclients
+      - kube_master
   - name: node1.osgiliath.test
     box: ${TESTBOX:-generic/fedora39}
     provider_options:

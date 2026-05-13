@@ -71,6 +71,23 @@
         idm_preferred_nic: "eth1"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
+        lvm_groups:
+          - vgname: non-persistent
+            disks:
+              - /dev/sdb1
+            create: true
+            lvmetanames:
+              - lvname: nfs_exposed
+                size: 4M
+                create: true
+                filesystem: xfs
+                expose_nfs: True
+                # insecure: yes, min_ip_to_share: 192.168.1.128
+                mntp: /var/nfs
+                mount: true
+        manage_lvm: true
+        configure_nfs: True
+
 - name: Prepare NFS client on Node
   hosts:
     - node1.osgiliath.test
