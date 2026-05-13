@@ -11,7 +11,7 @@ driver:
     name: virtualbox
 platforms:
   - name: idm.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
+    box: ${TESTBOX:-generic/fedora39}
     provider_options:
       cpus: 2
       memory: 2048
@@ -24,7 +24,7 @@ platforms:
     groups:
       - ipaservers
   - name: master.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
+    box: ${TESTBOX:-generic/fedora39}
     provider_options:
       cpus: 2
       memory: 2048
@@ -38,7 +38,7 @@ platforms:
       - kube_master
       - ipaclients
   - name: node1.osgiliath.test
-    box: ${TESTBOX:-bento/fedora-42}
+    box: ${TESTBOX:-generic/fedora39}
     provider_options:
       cpus: 2
       memory: 2048
@@ -53,8 +53,15 @@ platforms:
       - kube_node
 provisioner:
   name: ansible
+  env:
+    ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${HOME}/.ansible/collections:/usr/share/ansible/collections"
+    ANSIBLE_REMOTE_TMP: /var/tmp/ansible-remote
+    ANSIBLE_ASYNC_DIR: "/tmp/.ansible_async"
   options:
     vvv: True
+  config_options:
+    defaults:
+      remote_tmp: /var/tmp/ansible-remote
 #  config_options:
 #    defaults:
 #      forks: 20

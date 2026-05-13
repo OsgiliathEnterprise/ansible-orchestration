@@ -24,12 +24,6 @@
     msg: "{{ pod_data_folder_content }}"
     verbosity: 3
 
-- name: Delete-configuration | iterating over the pods
-  ansible.builtin.include_tasks: destroy-kubelet-volumes.yml
-  loop: "{{ pod_data_folder_content.files | map(attribute='path') }}"
-  loop_control:
-    loop_var: pod_files
-
 - name: Delete-configuration | remove unwanted packages
   ansible.builtin.package:
     name:
@@ -44,6 +38,13 @@
      - kubernetes-master
     state: absent
   become: Yes
+
+- name: Delete-configuration | iterating over the pods
+  ansible.builtin.include_tasks: destroy-kubelet-volumes.yml
+  loop: "{{ pod_data_folder_content.files | map(attribute='path') }}"
+  loop_control:
+    loop_var: pod_files
+
 
 # - name: ansible-orchestration | kube-destroy | Get a list of all running containers
 #  community.docker.docker_host_info:
@@ -79,29 +80,26 @@
   become: true
   loop:
     - /etc/cni
-    - /etc/containerd
     - /etc/kubernetes
     - /etc/sysconfig/kubelet
     - /etc/systemd/system/multi-user.target.wants/kubelet.service
-    - /root/.kube
     - /usr/lib/etcd
     - /usr/lib/kubelet
-    - /opt/containerd
     - /usr/lib/systemd/system/kubelet.service
     - /usr/lib/systemd/system/kubelet.service.d
     - /var/lib/etcd
     - /var/lib/cni
-    - /var/lib/containerd
     - /var/lib/kubelet
+    - /usr/local/bin/kubectl-calico
+    - /etc/containerd
+    - /opt/containerd
+    - /var/lib/containerd
+    - /root/.kube
+    - /home/kubecreds
   failed_when: false
 
-- name: Delete-configuration | Just force systemd to reread configs (2.4 and above)
-  ansible.builtin.systemd:
-    daemon_reload: yes
-  become: true
-
-- name: Delete-configuration | restart-firewall
-  ansible.builtin.service:
-    name: firewalld
-    state: restarted
-  become: true
+- name: Delete-configuration | Reboot the server
+  ansible.builtin.include_role:
+    name: robertdebock.reboot
+  vars:
+    ansible_become: yes

@@ -87,6 +87,10 @@
             protocol: tcp
           - port: 10250
             protocol: tcp
+          - port: 10251
+            protocol: tcp
+          - port: 10252
+            protocol: tcp
           - port: 10259
             protocol: tcp
           - port: 10257

@@ -93,6 +93,8 @@
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
       resolvConf: /run/systemd/resolve/resolv.conf
+#    kubernetes_config_kube_proxy_configuration:
+#      mode: nftables
 #      clusterDNS:
 #        - "{{ kube_cidr | next_nth_usable(9) }}"
 # - name: Kube-install | Create calico operator configmap

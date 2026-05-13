@@ -10,4 +10,5 @@ roles:
   - name: robertdebock.reboot
   - name: robertdebock.fail2ban
   - name: robertdebock.epel
+    version: 4.1.6
   - name: geerlingguy.ntp

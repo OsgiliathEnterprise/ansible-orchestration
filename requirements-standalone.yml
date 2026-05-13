@@ -14,6 +14,7 @@ roles:
   - name: tcharl.ansible_routing
   - name: robertdebock.fail2ban
   - name: robertdebock.epel
+    version: 4.1.6
   - name: geerlingguy.ntp
   - name: tcharl.fail2ban
   - name: tcharl.etchost_append
