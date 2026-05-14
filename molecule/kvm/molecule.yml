@@ -14,8 +14,8 @@ platforms:
     box: ${TESTBOX:-generic/fedora39}
     provider_options:
       driver: "kvm"
-      cpus: 2
-      memory: 3000
+      cpus: 4
+      memory: 5192
       qemu_use_session: false
     interfaces:
       - auto_config: true
@@ -28,8 +28,8 @@ platforms:
     box: ${TESTBOX:-generic/fedora39}
     provider_options:
       driver: "kvm"
-      cpus: 2
-      memory: 3000
+      cpus: 4
+      memory: 5192
       qemu_use_session: false
     interfaces:
       - auto_config: true
@@ -43,8 +43,8 @@ platforms:
     box: ${TESTBOX:-generic/fedora39}
     provider_options:
       driver: "kvm"
-      cpus: 2
-      memory: 3000
+      cpus: 4
+      memory: 5192
       qemu_use_session: false
     interfaces:
       - auto_config: true
