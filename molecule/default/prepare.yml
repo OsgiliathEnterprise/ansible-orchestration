@@ -51,3 +51,20 @@
         idm_preferred_nic: "eth1"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
+- name: configure containerization prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes
+  hosts: # use this order: master should be created before node
+    - master.osgiliath.test
+    - node1.osgiliath.test
+  roles:
+    - role: geerlingguy.containerd
+  become: Yes
+
+- name: configure kubernetes prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes
+  hosts:
+    - master.osgiliath.test
+    - node1.osgiliath.test
+  vars:
+    swap_file_state: absent
+  roles:
+    - role: geerlingguy.swap
+  become: Yes
