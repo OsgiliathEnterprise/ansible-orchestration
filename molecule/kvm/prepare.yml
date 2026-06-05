@@ -13,8 +13,8 @@
         name: tcharl.freeipa_server
       vars:
         secure_logs: False
-        preferred_nic: "eth1"
-        idm_preferred_nic: "eth1"
+        preferred_nic: "ens5"
+        idm_preferred_nic: "ens5"
         company_domain: osgiliath.test
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
@@ -32,9 +32,9 @@
       vars:
         standalone_role: False
         secure_logs: False
-        preferred_nic: "eth1"
+        preferred_nic: "ens5"
         company_domain: osgiliath.test
-        idm_preferred_nic: "eth1"
+        idm_preferred_nic: "ens5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: Prepare DNS
@@ -46,9 +46,9 @@
       vars:
         standalone_role: False
         secure_logs: False
-        preferred_nic: "eth1"
+        preferred_nic: "ens5"
         company_domain: osgiliath.test
-        idm_preferred_nic: "eth1"
+        idm_preferred_nic: "ens5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: Prepare NFS server on Master
@@ -60,9 +60,9 @@
       vars:
         standalone_role: False
         secure_logs: False
-        preferred_nic: "eth1"
+        preferred_nic: "ens5"
         company_domain: osgiliath.test
-        idm_preferred_nic: "eth1"
+        idm_preferred_nic: "ens5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
         lvm_groups:
@@ -90,9 +90,9 @@
       vars:
         standalone_role: False
         secure_logs: False
-        preferred_nic: "eth1"
+        preferred_nic: "ens5"
         company_domain: osgiliath.test
-        idm_preferred_nic: "eth1"
+        idm_preferred_nic: "ens5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: configure containerization prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes
