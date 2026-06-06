@@ -37,6 +37,8 @@ platforms:
       - auto_config: true
         network_name: private_network
         type: dhcp
+    provider_raw_config_args:
+      - "storage :file, :size => '1G', :device => 'vdb'"
 #        ip: "192.168.50.4"
     groups:
       - ipaclients
