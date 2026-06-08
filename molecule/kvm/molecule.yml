@@ -22,6 +22,7 @@ platforms:
       - auto_config: true
         network_name: private_network
         type: dhcp
+        libvirt__iface_name: "ens5"
 #        ip: "192.168.50.6"
     groups:
       - ipaservers
@@ -37,6 +38,7 @@ platforms:
       - auto_config: true
         network_name: private_network
         type: dhcp
+        libvirt__iface_name: "ens5"
     provider_raw_config_args:
       - "storage :file, :size => '1G', :device => 'vdb'"
 #        ip: "192.168.50.4"
@@ -55,6 +57,7 @@ platforms:
       - auto_config: true
         network_name: private_network
         type: dhcp
+        libvirt__iface_name: "ens5"
 #        ip: "192.168.50.5"
     groups:
       - ipaclients
