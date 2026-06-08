@@ -13,6 +13,7 @@
         name: tcharl.freeipa_server
       vars:
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
         preferred_nic: "ens5"
         idm_preferred_nic: "ens5"
         company_domain: osgiliath.test
@@ -32,6 +33,7 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -46,6 +48,7 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -60,6 +63,7 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -90,6 +94,7 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
