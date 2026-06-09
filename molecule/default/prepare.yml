@@ -13,6 +13,8 @@
         name: tcharl.freeipa_server
       vars:
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "eth1"
         idm_preferred_nic: "eth1"
         company_domain: osgiliath.test
@@ -32,6 +34,8 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "eth1"
         company_domain: osgiliath.test
         idm_preferred_nic: "eth1"
@@ -46,6 +50,8 @@
       vars:
         standalone_role: False
         secure_logs: False
+        skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "eth1"
         company_domain: osgiliath.test
         idm_preferred_nic: "eth1"

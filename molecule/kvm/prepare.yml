@@ -14,6 +14,7 @@
       vars:
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "ens5"
         idm_preferred_nic: "ens5"
         company_domain: osgiliath.test
@@ -34,6 +35,7 @@
         standalone_role: False
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -49,6 +51,7 @@
         standalone_role: False
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -64,6 +67,7 @@
         standalone_role: False
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
@@ -95,6 +99,7 @@
         standalone_role: False
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
+        skip_nameserver_assert: True
         preferred_nic: "ens5"
         company_domain: osgiliath.test
         idm_preferred_nic: "ens5"
