@@ -76,7 +76,7 @@
         lvm_groups:
           - vgname: non-persistent
             disks:
-              - /dev/sdb1
+              - /dev/vda3
             create: true
             lvmetanames:
               - lvname: nfs_exposed
