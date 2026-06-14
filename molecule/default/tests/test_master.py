@@ -60,6 +60,15 @@ def test_calico_operator_pods_running(host):
         assert int(cmd.stdout) > 0
 
 
+def test_kubectl_get_nodes_equals_two(host):
+    command = r"""
+    kubectl get nodes --no-headers | \
+    wc -l"""
+    with host.sudo():
+        cmd = host.run(command)
+        assert int(cmd.stdout) == 2
+
+
 def test_volume_is_create(host):
     command = r"""
     kubectl get pv | \
