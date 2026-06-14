@@ -31,6 +31,8 @@ platforms:
       - type: dhcp
         auto_config: true
         network_name: private_network
+    provider_raw_config_args:
+      - "customize ['set', :id, '--device-add', 'hdd', '--size', '840']"
     groups:
       - ipaclients
       - kube_master
@@ -50,8 +52,7 @@ provisioner:
   name: ansible
   env:
     ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${HOME}/.ansible/collections:/usr/share/ansible/collections"
-  options:
-    vvv: True
+    ANSIBLE_VERBOSITY: 2
   config_options:
     defaults:
       remote_tmp: /tmp

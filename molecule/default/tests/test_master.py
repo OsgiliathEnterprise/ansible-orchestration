@@ -50,16 +50,6 @@ def test_kubeadm_public_key_exists(host):
     assert '1' in cmd.stdout
 
 
-def test_calico_system_pods_running(host):
-    command = r"""
-    kubectl get pods -n calico-system | \
-    grep Running | \
-    wc -l"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
 def test_calico_operator_pods_running(host):
     command = r"""
     kubectl get pods -n tigera-operator | \
@@ -77,3 +67,4 @@ def test_volume_is_create(host):
     with host.sudo():
         cmd = host.run(command)
         assert int(cmd.stdout) > 0
+

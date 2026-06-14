@@ -67,6 +67,7 @@
     kubernetes_yum_base_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
     kubernetes_yum_gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
     kubernetes_version_fedora_package: "{{ kubernetes_package_version }}"
+    kubernetes_kubelet_extra_args: "--node-ip={{ orchestration_host_ip | ansible.utils.ipaddr }}"
     kubernetes_apiserver_advertise_address: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
     kubernetes_pod_network:
       cni: "{{ kube_cni }}"
