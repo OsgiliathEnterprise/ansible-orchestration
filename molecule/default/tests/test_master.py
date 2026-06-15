@@ -76,4 +76,3 @@ def test_volume_is_create(host):
     with host.sudo():
         cmd = host.run(command)
         assert int(cmd.stdout) > 0
-

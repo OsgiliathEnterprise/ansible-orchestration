@@ -22,11 +22,17 @@ jobs:
       - uses: actions/checkout@v3
         with:
           path: tcharl.ansible_orchestration
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: python -m pip install --upgrade uv
       - name: install prereq
         run: |
           cd tcharl.ansible_orchestration
-          ansible-galaxy role install -r requirements-standalone.yml
-          ansible-galaxy collection install -r requirements-collections.yml
+          uv tool run --python 3.13 --from ansible-core ansible-galaxy role install -r requirements-standalone.yml
+          uv tool run --python 3.13 --from ansible-core ansible-galaxy collection install -r requirements-collections.yml
   lint:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
@@ -37,16 +43,13 @@ jobs:
       - uses: actions/checkout@v3
         with:
           path: tcharl.ansible_orchestration
-      - name: update apt
-        run: |
-          sudo apt update
-      - name: install aptitude packages
-        run: |
-          sudo apt -y install sudo python3 python3-pip
-      - name: pip install packages
-        run: |
-          pip3 install wheel setuptools tox
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: python -m pip install --upgrade uv
       - name: tox lint
         run: |
           cd tcharl.ansible_orchestration
-          tox -e lint
+          uv tool run --python 3.13 --with tox tox -e lint

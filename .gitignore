@@ -4,3 +4,4 @@
 .tox
 .poetry
 .ansible
+dist/
