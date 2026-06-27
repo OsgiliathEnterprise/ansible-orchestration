@@ -15,7 +15,7 @@ docker_gpg_key: https://download.docker.com/linux/fedora/gpg
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
-k8s_version: "1.35" # See compatibility matrix with calico
-kubernetes_package_version: "{{ k8s_version }}.4-150500.1.1"
-calico_cni_version: "v3.32.0"
+k8s_version: "1.36" # See compatibility matrix with calico
+kubernetes_package_version: "{{ k8s_version }}.2-150500.2.1"
+calico_cni_version: "v3.32.1"
 calico_os: "linux"
