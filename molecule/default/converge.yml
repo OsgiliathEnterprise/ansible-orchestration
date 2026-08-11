@@ -14,6 +14,17 @@
     company_domain: osgiliath.test
   #        kube_alt_names:
 #          - "kubeadm.osgiliath.net"
+    nfs_mountpoints:
+      - host: idm.osgiliath.test
+        mountpoints:
+          - remote: /var/shared/csi
+            local: /net
+            csi_mount: Yes
+          - local: /net
+            remote: /var/shared/volume
+            kubernetes_volumes:
+              - subtree: /artefactrepo
+                mountsize: 1
   roles:
     - role: tcharl.ansible_orchestration
 
@@ -29,16 +40,5 @@
     idm_preferred_nic: "eth1"
     reset_kube: True
     company_domain: osgiliath.test
-    nfs_mountpoints:
-      - host: idm.osgiliath.test
-        mountpoints:
-          - remote: /var/shared/csi
-            local: /net
-            csi_mount: Yes
-          - local: /net
-            remote: /var/shared/volume
-            kubernetes_volumes:
-              - subtree: /artefactrepo
-                mountsize: 1
   roles:
     - role: tcharl.ansible_orchestration

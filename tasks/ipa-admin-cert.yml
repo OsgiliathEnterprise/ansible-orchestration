@@ -1,0 +1,28 @@
+---
+# Re-sign the admin cert with the IPA CA.
+# This is necessary because the API server now trusts the IPA CA for client authentication.
+
+- name: Ipa-admin-cert | create admin CSR
+  community.crypto.openssl_csr:
+    path: "{{ kubernetes_certificates_path }}admin.csr"
+    privatekey_path: "{{ kubernetes_certificates_path }}admin.key"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "{{ company_domain }}"
+    common_name: "kubernetes-admin"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - clientAuth
+  become: true
+
+- name: Ipa-admin-cert | request admin certificate from IPA
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    principal: "host/{{ orchestration_host_hostname }}"
+    csr_file: "{{ kubernetes_certificates_path }}admin.csr"
+    certificate_out: "{{ kubernetes_certificates_path }}admin.crt"
+    state: requested
+  no_log: "{{ secure_logs }}"
+  become: true

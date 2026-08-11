@@ -10,6 +10,27 @@
     - containerd
   become: Yes
 
+- name: Delete-configuration | clean stale kubeadm state
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  become: true
+  failed_when: false
+  loop:
+    - /etc/kubernetes/admin.conf
+    - /etc/kubernetes/controller-manager.conf
+    - /etc/kubernetes/scheduler.conf
+    - /etc/kubernetes/boottstrap-token.conf
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/pki
+
+- name: Delete-configuration | reset kubeadm state
+  ansible.builtin.command: kubeadm reset -f
+  register: res
+  changed_when: "'[reset]' in res.stdout"
+  failed_when: false
+  become: Yes
+
 - name: Delete-configuration | list files
   ansible.builtin.find:
     paths: "/var/lib/kubelet/pods"
@@ -45,38 +66,10 @@
   loop_control:
     loop_var: pod_files
 
-
-# - name: ansible-orchestration | kube-destroy | Get a list of all running containers
-#  community.docker.docker_host_info:
-#    containers: True
-#  become: Yes
-#  register: docker_info
-
-# - name: ansible-orchestration | kube-destroy | Debug a list of all running containers
-#  ansible.builtin.debug:
-#    msg: "{{ docker_info.containers }}"
-
-# - name: ansible-orchestration | kube-destroy | Stop all running containers
-#  community.docker.docker_container:
-#    name: '{{ item.Names[0] | regex_replace("^/", "") }}'
-#    state: absent
-#  become: Yes
-#  loop: '{{ docker_info.containers }}'
-
-# - name: ansible-orchestration | kube-destroy | Prune everything
-#  community.docker.docker_prune:
-#    containers: yes
-#    images: yes
-#    networks: yes
-#    volumes: yes
-#    builder_cache: yes
-#  become: Yes
-
 - name: Delete-configuration | remove kubernetes configuration folder
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-    recurse: true
   become: true
   loop:
     - /etc/cni

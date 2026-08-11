@@ -11,7 +11,7 @@
   ansible.builtin.setup:
     gather_subset:
       - network
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   register: masterfacts
 
 - name: Facts | get master facts
@@ -23,7 +23,7 @@
   ansible.builtin.setup:
     gather_subset:
       - network
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   register: idmfacts
 
 - name: Facts | get idm facts
@@ -79,5 +79,5 @@
 
 - name: Facts | IDM ip
   ansible.builtin.debug:
-    msg: orchestration_idm_ip
+    msg: "{{ orchestration_idm_ip }}"
     verbosity: 2

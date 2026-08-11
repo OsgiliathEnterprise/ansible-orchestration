@@ -20,31 +20,31 @@ platforms:
       - type: dhcp
         auto_config: true
         network_name: private_network
+    provider_raw_config_args:
+      - "customize ['set', :id, '--device-add', 'hdd', '--size', '7840']"
+    provider_raw_config_args:
+      - "customize ['set', :id, '--device-add', 'hdd', '--size', '7840']"
     groups:
       - ipaservers
   - name: master.osgiliath.test
     box: ${TESTBOX:-bento/fedora-43}
     provider_options:
-      cpus: 2
-      memory: 5120
-    interfaces:
-      - type: dhcp
-        auto_config: true
-        network_name: private_network
-    provider_raw_config_args:
-      - "customize ['set', :id, '--device-add', 'hdd', '--size', '840']"
+      cpus: 4
+      memory: 8192
+    networks:
+      - network: private_network
+        ip: 10.211.55.11
     groups:
       - ipaclients
       - kube_master
   - name: node1.osgiliath.test
     box: ${TESTBOX:-bento/fedora-43}
     provider_options:
-      cpus: 2
-      memory: 5120
-    interfaces:
-      - type: dhcp
-        auto_config: true
-        network_name: private_network
+      cpus: 4
+      memory: 8192
+    networks:
+      - network: private_network
+        ip: 10.211.55.12
     groups:
       - ipaclients
       - kube_node
@@ -56,12 +56,6 @@ provisioner:
   config_options:
     defaults:
       remote_tmp: /tmp
-#  config_options:
-#    defaults:
-#      forks: 20
-#   ssh_connection:
-#     pipelining: true
-#      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
 verifier:
   name: testinfra
   env:

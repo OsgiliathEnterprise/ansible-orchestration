@@ -1,0 +1,14 @@
+---
+# Wait for API server to be fully ready after CA swap.
+# The join command uses --discovery-token-unsafe-skip-ca-verification to bypass
+# the CA hash check, since the ConfigMap still contains the kubeadm CA.
+
+- name: Ipa-certs-reapply | wait for API server to be fully ready
+  ansible.builtin.wait_for:
+    port: 6443
+    delay: 15
+    timeout: 120
+    state: started
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  with_items: "{{ groups[kube_masters_group] }}"

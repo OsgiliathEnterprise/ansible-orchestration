@@ -79,12 +79,20 @@
               - /dev/vdb
             create: true
             lvmetanames:
+            lvmetanames:
               - lvname: nfs_exposed
                 size: 4M
                 create: true
                 filesystem: xfs
                 expose_nfs: True
-                mntp: /var/nfs
+                mntp: /var/nfs/csi
+                mount: true
+              - lvname: nfs_exposed2
+                size: 4M
+                create: true
+                filesystem: xfs
+                expose_nfs: True
+                mntp: /var/nfs/volume
                 mount: true
         manage_lvm: true
         configure_nfs: True

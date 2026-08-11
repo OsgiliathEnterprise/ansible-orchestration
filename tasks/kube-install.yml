@@ -1,5 +1,13 @@
 ---
 
+- name: Kube-install | Clean PKI directory before kubeadm init on master
+  ansible.builtin.file:
+    path: "{{ kubernetes_certificates_path }}"
+    state: absent
+  become: true
+  when:
+    - kube_masters_group in group_names
+
 - name: Kube-install | Create kubernetes configuration directory
   ansible.builtin.file:
     path: "{{ kube_config_folder }}"
@@ -57,9 +65,22 @@
     msg: "{{ kubernetes_package_version }}"
     verbosity: 2
 
+- name: Kube-install | Check if Kubernetes is already initialized on this host
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kube_already_initialized
+  become: true
+
+# Pre-join CA hash computation removed.
+# Node join is now handled by kube-install-join-node.yml after master post-processing
+# (IPAServer scale-down, ipa-certs, ipa-pki-swap, ipa-certs-reapply) completes.
+# This avoids the race condition where the ConfigMap CA changes between hash
+# computation and join execution.
+
 - name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:
     name: tcharl.kubernetes
+  when: not kube_already_initialized.stat.exists
   vars:
     ansible_become: true
     kubernetes_version: "{{ k8s_version }}"
@@ -73,44 +94,24 @@
       cni: "{{ kube_cni }}"
       cidr: "{{ kube_cidr }}"
     calico_version: "{{ calico_cni_version }}"
-#    kubernetes_calico_manifest_file: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_cni_version }}/manifests/tigera-operator.yaml"
     kubernetes_calico_configuration_file: "{{ calico_configuration_file.msg }}"
     kubernetes_allow_pods_on_control_plane: "{{ kubernetes_allow_pods_on_master }}"
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
+    kubernetes_join_command: ""
     kubernetes_config_cluster_configuration:
       networking:
         podSubnet: "{{ kube_cidr }}"
         serviceSubnet: "{{ kube_service_cidr | default('10.96.0.0/12') }}"
       apiServer:
-        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [orchestration_master_ip | ansible.utils.ipaddr] }}"
+        certSANs: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [orchestration_master_ip | ansible.utils.ipaddr, (kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)] }}"
         extraArgs:
           - name: authorization-mode
             value: Node,RBAC
-      controlPlaneEndpoint: "{{ orchestration_master_ip | ansible.utils.ipaddr }}:6443"
-#      scheduler:
-#        extraArgs:
-#          address: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
+      controlPlaneEndpoint: "{{ orchestration_host_hostname }}:6443"
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
       resolvConf: /run/systemd/resolve/resolv.conf
-#    kubernetes_config_kube_proxy_configuration:
-#      mode: nftables
-#      clusterDNS:
-#        - "{{ kube_cidr | next_nth_usable(9) }}"
-# - name: Kube-install | Create calico operator configmap
-#  kubernetes.core.k8s:
-#    namespace: tigera-operator
-#    definition:
-#      apiVersion: v1
-#      kind: ConfigMap
-#      data:
-#        KUBERNETES_SERVICE_HOST: "{{ orchestration_master_ip | ansible.utils.ipaddr }}"
-#        KUBERNETES_SERVICE_PORT: '6443'
-#    delegate_to: "{{ groups[kube_masters_group] | first }}"
-#    apply: yes
-#    server_side_apply:
-#      field_manager: ansible
 
 - name: Kube-install | Give secure permissions to kubernetes admin file
   ansible.builtin.file:

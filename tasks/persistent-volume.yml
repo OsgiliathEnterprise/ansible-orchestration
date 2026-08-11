@@ -4,17 +4,55 @@
   ansible.builtin.tempfile:
     state: directory
     suffix: pv
-  delegate_to: "{{ groups['kube_master'][0] }}"
+  delegate_to: "{{ groups['kube_master'] | first }}"
   register: persistent_volumes_temp_directory
+
+- name: Persistent-volume | remove old PV if it exists (nfs-prefixed)
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: PersistentVolume
+    name: "nfs{{ nfs_mountpoint.remote | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '' )}}"
+    ca_cert: "{{ kube_cacert_path | default(omit) }}"
+    client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+    client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+    kubeconfig: "{{ kube_config_path }}"
+    context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
+  failed_when: false
+  delegate_to: "{{ groups['kube_master'] | first }}"
+  become: true
+
+- name: Persistent-volume | remove old PV if it exists (local-prefixed)
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: PersistentVolume
+    name: "{{ nfs_mountpoint.local | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '' )}}"
+    ca_cert: "{{ kube_cacert_path | default(omit) }}"
+    client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+    client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+    kubeconfig: "{{ kube_config_path }}"
+    context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
+  failed_when: false
+  delegate_to: "{{ groups['kube_master'] | first }}"
+  become: true
+
+- name: Persistent-volume | ensure subtree directory exists on NFS server
+  ansible.builtin.file:
+    path: "{{ nfs_mountpoint.remote + (kube_volume_to_mount.subtree | default('')) }}"
+    state: directory
+    mode: '0755'
+  delegate_to: "{{ nfs_mountpoint.nfs_server }}"
+  become: true
 
 - name: Persistent-volume | create persistent volume file
   ansible.builtin.template:
     src: persistent-volume.yml.j2
     dest: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
     mode: '0600'
-  delegate_to: "{{ groups['kube_master'][0] }}"
+  delegate_to: "{{ groups['kube_master'] | first }}"
 
-- name: Persistent-volume | execute kubectl apply # TODO replace by CSI storage
+- name: Persistent-volume | execute kubectl apply
   kubernetes.core.k8s:
     state: present
     src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
@@ -23,6 +61,8 @@
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  failed_when: false # TODO flemme to delete existing volume
-  delegate_to: "{{ groups['kube_master'][0] }}"
+  failed_when: false
+  delegate_to: "{{ groups['kube_master'] | first }}"
   become: true
+
+

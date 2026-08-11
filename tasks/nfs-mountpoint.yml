@@ -1,7 +1,7 @@
 ---
 
-- name: Nfs-mountpoint | iterate through kubernetes volumes for declared volumes
+- name: Nfs-mountpoints | create persistent volume for enriched item
   ansible.builtin.include_tasks: persistent-volume.yml
-  loop: "{{ nfs_mountpoint.kubernetes_volumes | default([]) }}"
-  loop_control:
-    loop_var: kube_volume_to_mount
+  vars:
+    nfs_mountpoint: "{{ _pv_item.nfs_mountpoint }}"
+    kube_volume_to_mount: "{{ _pv_item.kube_volume_to_mount }}"

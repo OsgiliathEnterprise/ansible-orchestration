@@ -1,0 +1,57 @@
+---
+# Refresh the join command with the current CA hash from the ConfigMap.
+# This ensures the join command uses the correct CA hash at join time,
+# accounting for any ConfigMap changes by the API server.
+
+- name: Kube-install-refresh-join | get current CA DER hash from ConfigMap on master
+  ansible.builtin.shell: |
+    curl -sk https://localhost:6443/api/v1/namespaces/kube-public/configmaps/cluster-info -o /tmp/current-cm.json
+    python3 << 'PYEOF'
+    import json,base64,subprocess,tempfile,os
+    cm=json.load(open('/tmp/current-cm.json'))
+    kc=cm['data']['kubeconfig']
+    for l in kc.split(chr(10)):
+      if 'certificate-authority-data' in l:
+        b64=l.split(':',1)[1].strip()
+        pem=base64.b64decode(b64).decode()
+        break
+    with tempfile.NamedTemporaryFile(suffix='.crt',delete=False,mode='w') as f:
+      f.write(pem)
+      tmpf=f.name
+    r=subprocess.run(['openssl','x509','-in',tmpf,'-outform','DER'],capture_output=True)
+    r2=subprocess.run(['openssl','dgst','-sha256'],input=r.stdout,capture_output=True)
+    print(r2.stdout.decode().split()[-1].lower())
+    os.unlink(tmpf)
+    PYEOF
+  become: true
+  changed_when: false
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: current_ca_hash_on_master
+  retries: 5
+  delay: 10
+  until: current_ca_hash_on_master.rc == 0
+
+- name: Kube-install-refresh-join | slurp IPA CA from master for direct hash
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_certificates_path }}ca.crt"
+  become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: ipa_ca_raw_refresh
+
+- name: Kube-install-refresh-join | compute IPA CA DER hash directly
+  ansible.builtin.shell: |
+    echo "{{ ipa_ca_raw_refresh.content }}" | base64 -d | openssl x509 -outform DER 2>/dev/null | openssl dgst -sha256 | awk '{print $NF}'
+  become: true
+  changed_when: false
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: ipa_ca_der_hash_refresh
+
+- name: Kube-install-refresh-join | extract join token and API server address from existing join command
+  ansible.builtin.set_fact:
+    kube_join_token_refreshed: "{{ kubernetes_join_command | regex_search('--token (\\S+)', '\\1') | first }}"
+    kube_api_server_addr_refreshed: "{{ kubernetes_join_command | regex_search('join (\\S+)', '\\1') | first }}"
+
+- name: Kube-install-refresh-join | reconstruct join command with IPA CA DER hash
+  ansible.builtin.set_fact:
+    kubernetes_join_command: >
+      kubeadm join {{ kube_api_server_addr_refreshed }} --token {{ kube_join_token_refreshed }} --discovery-token-ca-cert-hash sha256:{{ ipa_ca_der_hash_refresh.stdout | trim | lower }}

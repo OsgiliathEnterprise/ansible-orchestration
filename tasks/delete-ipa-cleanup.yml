@@ -1,0 +1,10 @@
+---
+- name: Delete-ipa-cleanup | revoke admin certificate from IPA
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    certificate_name: "kubeclusteradm"
+    state: revoked
+  failed_when: false
+  become: true
+  no_log: "{{ secure_logs }}"

@@ -1,0 +1,198 @@
+---
+# Join the node by directly copying admin.conf as kubelet.conf,
+# bypassing bootstrap entirely since the cert swap breaks JWS signature publishing.
+
+- name: Kube-install-join | check if node already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  become: true
+  register: kube_node_joined
+
+- name: Kube-install-join | join node (skip if already joined)
+  when: not kube_node_joined.stat.exists
+  block:
+    - name: Kube-install-join | remove kubeadm drop-in so kubelet won't try bootstrap on restart
+      ansible.builtin.file:
+        path: /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+        state: absent
+      become: true
+      failed_when: false
+
+    - name: Kube-install-join | remove stale bootstrap drop-in if present
+      ansible.builtin.file:
+        path: /etc/systemd/system/kubelet.service.d/20-bootstrap.conf
+        state: absent
+      become: true
+
+    - name: Kube-install-join | ensure drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/kubelet.service.d
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Kube-install-join | create our own kubelet drop-in
+      ansible.builtin.copy:
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/kubelet --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --cgroup-driver=systemd
+        dest: /etc/systemd/system/kubelet.service.d/20-orchestration.conf
+        mode: '0644'
+      become: true
+
+    - name: Kube-install-join | reload systemd with new drop-in
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+
+    - name: Kube-install-join | stop kubelet (won't restart with old args now)
+      ansible.builtin.systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+        force: true
+      become: true
+      changed_when: false
+
+    - name: Kube-install-join | kill any remaining kubelet processes
+      ansible.builtin.shell: |
+        pkill -9 kubelet 2>/dev/null || true
+        sleep 1
+        pgrep kubelet || echo "kubelet stopped"
+      become: true
+      changed_when: false
+
+    - name: Kube-install-join | reset kubeadm state from failed join attempt
+      ansible.builtin.shell: |
+        kubeadm reset -f 2>/dev/null || true
+      become: true
+      changed_when: false
+
+    - name: Kube-install-join | remove stale kubelet artifacts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      become: true
+      loop:
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/bootstrap-kubelet.conf
+        - /var/lib/kubelet/pki
+
+    - name: Kube-install-join | create pki directory on node
+      ansible.builtin.file:
+        path: /etc/kubernetes/pki
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Kube-install-join | copy CA cert from master
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/pki/ca.crt
+      become: true
+      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      register: kube_ca_crt
+
+    - name: Kube-install-join | install CA cert on node
+      ansible.builtin.copy:
+        content: "{{ kube_ca_crt.content | b64decode }}"
+        dest: /etc/kubernetes/pki/ca.crt
+        mode: '0644'
+      become: true
+
+    - name: Kube-install-join | create kubecreds directory on node
+      ansible.builtin.file:
+        path: /home/kubecreds
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Kube-install-join | copy admin client cert from master
+      ansible.builtin.slurp:
+        src: /home/kubecreds/kubeadm.crt
+      become: true
+      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      register: kube_admin_crt
+
+    - name: Kube-install-join | install admin client cert on node
+      ansible.builtin.copy:
+        content: "{{ kube_admin_crt.content | b64decode }}"
+        dest: /home/kubecreds/kubeadm.crt
+        mode: '0644'
+      become: true
+
+    - name: Kube-install-join | copy admin client key from master
+      ansible.builtin.slurp:
+        src: /home/kubecreds/kubeadm.pem
+      become: true
+      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      register: kube_admin_pem
+
+    - name: Kube-install-join | install admin client key on node
+      ansible.builtin.copy:
+        content: "{{ kube_admin_pem.content | b64decode }}"
+        dest: /home/kubecreds/kubeadm.pem
+        mode: '0600'
+      become: true
+
+    - name: Kube-install-join | copy admin.conf from master as kubelet.conf
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      become: true
+      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      register: kube_admin_conf
+
+    - name: Kube-install-join | create kubelet.conf on node
+      ansible.builtin.copy:
+        content: "{{ kube_admin_conf.content | b64decode }}"
+        dest: /etc/kubernetes/kubelet.conf
+        mode: '0640'
+      become: true
+
+    - name: Kube-install-join | create minimal kubelet config
+      ansible.builtin.copy:
+        content: |
+          apiVersion: kubelet.config.k8s.io/v1beta1
+          kind: KubeletConfiguration
+          cgroupDriver: systemd
+          clusterDNS:
+            - 10.96.0.10
+          clusterDomain: cluster.local
+        dest: /var/lib/kubelet/config.yaml
+        mode: '0644'
+      become: true
+
+    - name: Kube-install-join | start kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+        enabled: true
+        daemon_reload: true
+      become: true
+
+    - name: Kube-install-join | wait for node to appear in cluster
+      ansible.builtin.shell: |
+        kubectl get node {{ inventory_hostname }} --kubeconfig /etc/kubernetes/admin.conf
+      become: true
+      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      retries: 40
+      delay: 5
+      register: node_check
+      until: node_check.rc == 0
+      changed_when: false
+
+  rescue:
+    - name: Kube-install-join | capture kubelet logs for debugging
+      ansible.builtin.shell: |
+        journalctl -u kubelet --no-pager -n 2000
+      become: true
+      changed_when: false
+      register: kubelet_logs
+
+    - name: Kube-install-join | show kubelet logs
+      ansible.builtin.debug:
+        var: kubelet_logs.stdout_lines
+
+    - name: Kube-install-join | fail if join failed
+      ansible.builtin.fail:
+        msg: "Node join failed - kubelet not active. Check kubelet logs above."
