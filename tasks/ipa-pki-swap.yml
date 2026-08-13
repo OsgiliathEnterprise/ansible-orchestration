@@ -2,6 +2,7 @@
 
 - name: Ipa-pki-swap | patch kubeconfigs to use IPA CA cert
   ansible.builtin.shell: |
+    set -euo pipefail
     for conf in /etc/kubernetes/controller-manager.conf /etc/kubernetes/scheduler.conf /etc/kubernetes/kubelet.conf; do
       sed -i 's|^\(\s*\)certificate-authority-data:.*|\1certificate-authority: /etc/kubernetes/pki/ca.crt|' "$conf"
     done
@@ -22,6 +23,7 @@
 
 - name: Ipa-pki-swap | patch user kubeconfigs to use IPA CA cert
   ansible.builtin.shell: |
+    set -euo pipefail
     for conf in /home/vagrant/.kube/config /root/.kube/config; do
       if [ -f "$conf" ]; then
         sed -i 's|^\(\s*\)certificate-authority-data:.*|\1certificate-authority: /etc/kubernetes/pki/ca.crt|' "$conf"

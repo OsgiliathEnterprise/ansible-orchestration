@@ -5,6 +5,7 @@
     ca: kubernetes-ca
     certificate_name: "kubeclusteradm"
     state: revoked
+    reason: 4
   failed_when: false
   become: true
   no_log: "{{ secure_logs }}"

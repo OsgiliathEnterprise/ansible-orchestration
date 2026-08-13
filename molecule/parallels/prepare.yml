@@ -16,7 +16,7 @@
         idm_preferred_nic: "enp0s5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
-- name: Prepare
+- name: Prepare secure the hosts
   hosts:
     - master.osgiliath.test
     - node1.osgiliath.test
@@ -75,8 +75,8 @@
                 filesystem: xfs
                 expose_nfs: True
                 mntp: /var/nfs/volume
-                sec: "*(rw)"
-                mount: true
+                sec: "*(rw,no_root_squash,no_subtree_check)"
+                csi_mount: true
         manage_lvm: true
         configure_nfs: True
 

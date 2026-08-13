@@ -1,7 +1,9 @@
 ---
 
 - name: Ipa-kubernetes-ca | ensure Kerberos ticket is valid
-  ansible.builtin.shell: echo '{{ company_realm_password }}' | kinit admin
+  ansible.builtin.shell: |
+    set -euo pipefail
+    echo '{{ company_realm_password }}' | kinit admin
   delegate_to: "{{ groups[idm_group] | first }}"
   changed_when: false
   become: true
@@ -20,7 +22,7 @@
   changed_when: false
 
 - name: Ipa-kubernetes-ca | restart IPA services to load patched cert.py
-  ansible.builtin.shell: ipactl restart
+  ansible.builtin.command: ipactl restart
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   changed_when: false
@@ -221,5 +223,3 @@
   changed_when: >-
     not ipa_certprofile_kubeadm_exists.stdout == '1'
   become: true
-
-

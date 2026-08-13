@@ -17,11 +17,8 @@
     nfs_mountpoints:
       - host: idm.osgiliath.test
         mountpoints:
-          - remote: /var/shared/csi
-            local: /net
-            csi_mount: Yes
           - local: /net
-            remote: /var/shared/volume
+            remote: /var/nfs/volume
             kubernetes_volumes:
               - subtree: /artefactrepo
                 mountsize: 1
@@ -40,5 +37,6 @@
     reset_kube: True
     standalone_role: False
     company_domain: osgiliath.test
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
   roles:
     - role: tcharl.ansible_orchestration

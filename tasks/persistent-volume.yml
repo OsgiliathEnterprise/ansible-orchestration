@@ -12,7 +12,7 @@
     state: absent
     api_version: v1
     kind: PersistentVolume
-    name: "nfs{{ nfs_mountpoint.remote | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '' )}}"
+    name: "nfs{{ nfs_mountpoint.remote | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
     ca_cert: "{{ kube_cacert_path | default(omit) }}"
     client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
@@ -27,7 +27,7 @@
     state: absent
     api_version: v1
     kind: PersistentVolume
-    name: "{{ nfs_mountpoint.local | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '' )}}"
+    name: "{{ nfs_mountpoint.local | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
     ca_cert: "{{ kube_cacert_path | default(omit) }}"
     client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
@@ -54,15 +54,13 @@
 
 - name: Persistent-volume | execute kubectl apply
   kubernetes.core.k8s:
-    state: present
-    src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
-    ca_cert: "{{ kube_cacert_path | default(omit) }}"
-    client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
-    client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
-    kubeconfig: "{{ kube_config_path }}"
-    context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
+   state: present
+   src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
+   ca_cert: "{{ kube_cacert_path | default(omit) }}"
+   client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+   client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+   kubeconfig: "{{ kube_config_path }}"
+   context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
   failed_when: false
   delegate_to: "{{ groups['kube_master'] | first }}"
   become: true
-
-

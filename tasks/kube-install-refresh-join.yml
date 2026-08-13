@@ -40,6 +40,7 @@
 
 - name: Kube-install-refresh-join | compute IPA CA DER hash directly
   ansible.builtin.shell: |
+    set -euo pipefail
     echo "{{ ipa_ca_raw_refresh.content }}" | base64 -d | openssl x509 -outform DER 2>/dev/null | openssl dgst -sha256 | awk '{print $NF}'
   become: true
   changed_when: false

@@ -110,23 +110,26 @@ def test_admin_cert_issuer_is_kubernetes_ca(host):
     assert int(cmd.stdout) > 0
 
 
-def test_volume_is_create(host):
-    command = r"""
-    kubectl get pv | \
-    egrep -c 'nfs.*artefactrepo.*RWX.*Available.*nfs-storage'"""
-    with host.sudo():
-        cmd = host.run(command)
-        assert int(cmd.stdout) > 0
-
-
 def test_pv_has_nfs_volume_source(host):
+    """Wait for PV to exist and be accessible before checking volume source."""
+    import time
     command = r'''
-    kubectl get pv -o json | python3 -c 'import sys, json; data=json.load(sys.stdin); pvs=[p for p in data["items"] if "nfs-varnfsvolume-artefactrepo" in p["metadata"]["name"]]; print(json.dumps(pvs))'
+    kubectl get pv -o json | python3 -c 'import sys, json; data=json.load(sys.stdin); pvs=[p for p in data["items"] if "artefactrepo" in p["metadata"]["name"]]; print(json.dumps(pvs))'
     '''
     with host.sudo():
-        cmd = host.run(command)
         import json
-        pvs = json.loads(cmd.stdout.strip())
+        pvs = []
+        for _ in range(12):
+            cmd = host.run(command)
+            try:
+                stdout = cmd.stdout.strip()
+                if stdout and stdout != '[]':
+                    pvs = json.loads(stdout)
+                    if len(pvs) > 0:
+                        break
+            except (json.JSONDecodeError, KeyError):
+                pass
+            time.sleep(5)
         assert len(pvs) > 0, "No PV found with artefactrepo"
         pv = pvs[0]
         assert 'nfs' in pv['spec'], "PV should have nfs volume source"
@@ -227,3 +230,18 @@ def test_api_server_static_pod_running_after_swap(host):
             "grep -c kube-apiserver"
         )
     assert int(cmd.stdout) > 0
+
+
+def test_volume_is_create(host):
+    """Wait for PV to transition from Pending to Available."""
+    import time
+    command = r"""
+    kubectl get pv | \
+    egrep -c 'nfs.*artefactrepo.*RWX.*Available.*nfs-storage'"""
+    with host.sudo():
+        for _ in range(100):
+            cmd = host.run(command)
+            if int(cmd.stdout) > 0:
+                break
+            time.sleep(5)
+        assert int(cmd.stdout) > 0

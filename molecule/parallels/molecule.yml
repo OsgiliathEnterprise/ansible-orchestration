@@ -22,8 +22,6 @@ platforms:
         network_name: private_network
     provider_raw_config_args:
       - "customize ['set', :id, '--device-add', 'hdd', '--size', '7840']"
-    provider_raw_config_args:
-      - "customize ['set', :id, '--device-add', 'hdd', '--size', '7840']"
     groups:
       - ipaservers
   - name: master.osgiliath.test

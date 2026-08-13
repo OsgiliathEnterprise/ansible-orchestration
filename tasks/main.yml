@@ -37,6 +37,8 @@
     - kube_masters_group in group_names
 
 - name: Install kube on nodes (packages + kubelet, join deferred to file-based discovery)
+  when:
+    - kube_nodes_group in group_names
   block:
     - name: Install kube on nodes
       ansible.builtin.include_tasks: kube-install.yml
@@ -44,8 +46,6 @@
     - name: Node join failed (expected on first converge), will retry with file-based discovery
       ansible.builtin.debug:
         msg: "Node join failed during kube-install. Packages installed. Will join via kube-install-join-node.yml after master post-processing."
-  when:
-    - kube_nodes_group in group_names
 
 - name: Join nodes before API server cert swap (JWS signature still valid)
   ansible.builtin.include_tasks: kube-install-join-node.yml

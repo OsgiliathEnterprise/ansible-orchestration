@@ -18,6 +18,7 @@
   ansible.builtin.copy:
     src: "{{ kubernetes_certificates_path }}ca.crt"
     dest: "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
+    mode: '0640'
     remote_src: yes
   failed_when: false
   become: true
@@ -35,6 +36,7 @@
 
 - name: Ipa-certs | verify ca.crt.new fingerprint matches expected IPA CA
   ansible.builtin.shell: |
+    set -euo pipefail
     openssl x509 -in {{ kubernetes_certificates_path }}ca.crt.new -noout -fingerprint -sha256 2>/dev/null | tr -d ':' | tr '[:upper:]' '[:lower:]' | sed 's/sha256 fingerprint=//'
   become: true
   changed_when: false
@@ -122,7 +124,7 @@
     mode: '0600'
     owner: root
     group: root
-    type: ec
+    type: Ed25519
     size: 256
   when:
    - not kube_sa_key_result.stat.exists
@@ -176,5 +178,3 @@
   register: kubectl_verify
   retries: 3
   delay: 10
-
-
