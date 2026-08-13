@@ -1,11 +1,108 @@
 ---
-- name: Delete-ipa-cleanup | revoke admin certificate from IPA
+- name: Delete-ipa-cleanup | Check admin cert existence
+  ansible.builtin.stat:
+    path: "{{ kube_credential_folder }}/kubeadm.crt"
+  register: _cleanup_admin_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from admin cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in "{{ kube_credential_folder }}/kubeadm.crt" -serial -noout | cut -d= -f2
+  register: _cleanup_admin_cert_serial
+  changed_when: false
+  when: _cleanup_admin_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke admin certificate from IPA using serial number
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    certificate_name: "kubeclusteradm"
+    serial_number: "{{ _cleanup_admin_cert_serial.stdout }}"
     state: revoked
     reason: 4
   failed_when: false
+  when: _cleanup_admin_cert_stat.stat.exists and _cleanup_admin_cert_serial is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check apiserver cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/apiserver.crt"
+  register: _cleanup_apiserver_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from apiserver cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in "{{ kubernetes_certificates_path }}/apiserver.crt" -serial -noout | cut -d= -f2
+  register: _cleanup_apiserver_cert_serial
+  changed_when: false
+  when: _cleanup_apiserver_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke apiserver certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ _cleanup_apiserver_cert_serial.stdout }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_apiserver_cert_stat.stat.exists and _cleanup_apiserver_cert_serial is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check kubelet client cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt"
+  register: _cleanup_kubelet_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from kubelet client cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt" -serial -noout | cut -d= -f2
+  register: _cleanup_kubelet_cert_serial
+  changed_when: false
+  when: _cleanup_kubelet_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke kubelet client certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ _cleanup_kubelet_cert_serial.stdout }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_kubelet_cert_stat.stat.exists and _cleanup_kubelet_cert_serial is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check front-proxy cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/front-proxy-client.crt"
+  register: _cleanup_frontproxy_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from front-proxy cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in "{{ kubernetes_certificates_path }}/front-proxy-client.crt" -serial -noout | cut -d= -f2
+  register: _cleanup_frontproxy_cert_serial
+  changed_when: false
+  when: _cleanup_frontproxy_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke front-proxy certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ _cleanup_frontproxy_cert_serial.stdout }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_serial is defined
   become: true
   no_log: "{{ secure_logs }}"
