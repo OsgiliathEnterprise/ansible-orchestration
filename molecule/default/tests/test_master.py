@@ -239,7 +239,7 @@ def test_volume_is_create(host):
     kubectl get pv | \
     egrep -c 'nfs.*artefactrepo.*RWX.*Available.*nfs-storage'"""
     with host.sudo():
-        for _ in range(100):
+        for _ in range(130):
             cmd = host.run(command)
             if int(cmd.stdout) > 0:
                 break

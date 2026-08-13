@@ -3,33 +3,54 @@
 # This ensures the join command uses the correct CA hash at join time,
 # accounting for any ConfigMap changes by the API server.
 
-- name: Kube-install-refresh-join | get current CA DER hash from ConfigMap on master
-  ansible.builtin.shell: |
-    curl -sk https://localhost:6443/api/v1/namespaces/kube-public/configmaps/cluster-info -o /tmp/current-cm.json
-    python3 << 'PYEOF'
-    import json,base64,subprocess,tempfile,os
-    cm=json.load(open('/tmp/current-cm.json'))
-    kc=cm['data']['kubeconfig']
-    for l in kc.split(chr(10)):
-      if 'certificate-authority-data' in l:
-        b64=l.split(':',1)[1].strip()
-        pem=base64.b64decode(b64).decode()
-        break
-    with tempfile.NamedTemporaryFile(suffix='.crt',delete=False,mode='w') as f:
-      f.write(pem)
-      tmpf=f.name
-    r=subprocess.run(['openssl','x509','-in',tmpf,'-outform','DER'],capture_output=True)
-    r2=subprocess.run(['openssl','dgst','-sha256'],input=r.stdout,capture_output=True)
-    print(r2.stdout.decode().split()[-1].lower())
-    os.unlink(tmpf)
-    PYEOF
+- name: Kube-install-refresh-join | fetch cluster-info ConfigMap from API server
+  ansible.builtin.uri:
+    url: https://localhost:6443/api/v1/namespaces/kube-public/configmaps/cluster-info
+    validate_certs: false
+    return_content: true
   become: true
-  changed_when: false
   delegate_to: "{{ groups[kube_masters_group] | first }}"
-  register: current_ca_hash_on_master
+  register: cluster_info_cm
   retries: 5
   delay: 10
-  until: current_ca_hash_on_master.rc == 0
+  until: cluster_info_cm.status == 200
+
+- name: Kube-install-refresh-join | extract kubeconfig from ConfigMap response
+  ansible.builtin.set_fact:
+    _kube_join_kubeconfig: "{{ cluster_info_cm.json.data.kubeconfig }}"
+
+- name: Kube-install-refresh-join | extract certificate-authority-data from kubeconfig
+  ansible.builtin.set_fact:
+    _kube_join_ca_b64: >-
+      {{ cluster_info_cm.json.data.kubeconfig
+        | regex_search('certificate-authority-data:\\s*([A-Za-z0-9+/=]+)', '\\1')
+        | first
+        | trim }}
+
+- name: Kube-install-refresh-join | decode CA PEM and write to temp file
+  ansible.builtin.copy:
+    content: "{{ _kube_join_ca_b64 | b64decode }}"
+    dest: "/tmp/current-cm-ca.crt"
+    mode: "0600"
+  become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+
+- name: Kube-install-refresh-join | compute CA DER SHA256 hash from ConfigMap
+  ansible.builtin.shell: |
+    set -euo pipefail
+    openssl x509 -in /tmp/current-cm-ca.crt -outform DER 2>/dev/null \
+      | openssl dgst -sha256 | awk '{print $NF}'
+  become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: current_ca_hash_on_master
+  changed_when: false
+
+- name: Kube-install-refresh-join | clean up temporary CA file
+  ansible.builtin.file:
+    path: /tmp/current-cm-ca.crt
+    state: absent
+  become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
 
 - name: Kube-install-refresh-join | slurp IPA CA from master for direct hash
   ansible.builtin.slurp:
