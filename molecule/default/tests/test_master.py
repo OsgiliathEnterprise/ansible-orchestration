@@ -205,6 +205,41 @@ def test_apiserver_crt_signed_by_kubernetes_ca(host):
     assert int(cmd.stdout) > 0
 
 
+def test_apiserver_kubelet_client_crt_signed_by_kubernetes_ca(host):
+    with host.sudo():
+        cmd = host.run(
+            "openssl x509 -in /etc/kubernetes/pki/apiserver-kubelet-client.crt -noout -issuer | "
+            "grep -ic 'kubernetes-ca'"
+        )
+    assert int(cmd.stdout) > 0
+
+
+def test_front_proxy_client_crt_signed_by_kubernetes_ca(host):
+    with host.sudo():
+        cmd = host.run(
+            "openssl x509 -in /etc/kubernetes/pki/front-proxy-client.crt -noout -issuer | "
+            "grep -ic 'kubernetes-ca'"
+        )
+    assert int(cmd.stdout) > 0
+
+
+def test_kubernetes_ca_signed_by_ipa_root_ca(host):
+    """Verify kubernetes-ca chains back to the IPA root CA.
+
+    On an IPA client, /etc/ipa/ca.crt is installed by the enrollment process
+    and contains the IPA Dogtag CA certificates (root + any intermediates).
+    We use that instead of fetching over HTTP — port 8443 may not be reachable
+    from inside the VM network.
+    """
+    ipa_ca = host.file("/etc/ipa/ca.crt")
+    assert ipa_ca.exists, "/etc/ipa/ca.crt should exist on an IPA client"
+    with host.sudo():
+        cmd = host.run(
+            "openssl verify -CAfile /etc/ipa/ca.crt /etc/kubernetes/pki/ca.crt"
+        )
+    assert 'OK' in cmd.stdout
+
+
 def test_controller_manager_conf_references_ipa_ca(host):
     cfg = host.file("/etc/kubernetes/controller-manager.conf")
     assert cfg.exists
