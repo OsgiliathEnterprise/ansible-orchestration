@@ -1,45 +1,73 @@
 ---
 
 - name: Drain-and-reset | remove charts with disruption budget (istio-ingress)
-  ansible.builtin.command: "helm delete istio-ingress -n istio-system"
+  kubernetes.core.helm:
+    name: istio-ingress
+    namespace: istio-system
+    release_state: absent
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
-  register: _result
-  changed_when: "'uninstalled' in _result.stdout"
   failed_when: false
 
 - name: Drain-and-reset | remove charts with disruption budget (istio-egress)
-  ansible.builtin.command: "helm delete istio-egress -n istio-system"
+  kubernetes.core.helm:
+    name: istio-egress
+    namespace: istio-system
+    release_state: absent
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
   failed_when: false
 
 - name: Drain-and-reset | remove charts with disruption budget (istiod)
-  ansible.builtin.command: "helm delete istiod -n istio-system"
+  kubernetes.core.helm:
+    name: istiod
+    namespace: istio-system
+    release_state: absent
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
   failed_when: false
 
 - name: Drain-and-reset | remove charts with disruption budget (istio-base)
-  ansible.builtin.command: "helm delete istio-base -n istio-system"
+  kubernetes.core.helm:
+    name: istio-base
+    namespace: istio-system
+    release_state: absent
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
   failed_when: false
 
 - name: Drain-and-reset | drain nodes
-  ansible.builtin.command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-emptydir-data --force --timeout=800s --ignore-daemonsets=true"
+  kubernetes.core.k8s_drain:
+    name: "{{ hostvars[registeredhost].hostname | default(registeredhost) }}"
+    state: drain
+    force: true
+    ignore_daemonsets: true
+    delete_emptydir_data: true
+    terminate_grace_period: 800
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
   failed_when: false
-  register: res
-  changed_when: res.stdout == "node/" + hostvars[registeredhost].hostname | default(registeredhost) + "drained"
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
   loop_control:
     loop_var: registeredhost
 
-- name: Drain-and-reset | delete nodes at master level
-  ansible.builtin.command: "kubectl delete node --all"
-  register: res
-  changed_when: "'deleted' in res.stdout"
+- name: Drain-and-reset | list all nodes for deletion
+  kubernetes.core.k8s_info:
+    kind: Node
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
+  register: _k8s_nodes
+  failed_when: false
+
+- name: Drain-and-reset | delete nodes at master level
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Node
+    name: "{{ item.metadata.name }}"
+    state: absent
+    kubeconfig: "{{ kube_config_path }}"
+  become: Yes
+  loop: "{{ _k8s_nodes.resources | default([]) }}"
   failed_when: false
 
 - name: Drain-and-reset | reset kubeadm

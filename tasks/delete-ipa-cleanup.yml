@@ -6,11 +6,9 @@
   become: true
 
 - name: Delete-ipa-cleanup | Extract serial number from admin cert
-  ansible.builtin.shell: |
-    set -o pipefail
-    openssl x509 -in "{{ kube_credential_folder }}/kubeadm.crt" -serial -noout | cut -d= -f2
-  register: _cleanup_admin_cert_serial
-  changed_when: false
+  community.crypto.x509_certificate_info:
+    path: "{{ kube_credential_folder }}/kubeadm.crt"
+  register: _cleanup_admin_cert_info
   when: _cleanup_admin_cert_stat.stat.exists
   become: true
 
@@ -18,11 +16,11 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ _cleanup_admin_cert_serial.stdout }}"
+    serial_number: "{{ '%X' | format(_cleanup_admin_cert_info.cert.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
-  when: _cleanup_admin_cert_stat.stat.exists and _cleanup_admin_cert_serial is defined
+  when: _cleanup_admin_cert_stat.stat.exists and _cleanup_admin_cert_info is defined
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -33,11 +31,9 @@
   become: true
 
 - name: Delete-ipa-cleanup | Extract serial number from apiserver cert
-  ansible.builtin.shell: |
-    set -o pipefail
-    openssl x509 -in "{{ kubernetes_certificates_path }}/apiserver.crt" -serial -noout | cut -d= -f2
-  register: _cleanup_apiserver_cert_serial
-  changed_when: false
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/apiserver.crt"
+  register: _cleanup_apiserver_cert_info
   when: _cleanup_apiserver_cert_stat.stat.exists
   become: true
 
@@ -45,11 +41,11 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ _cleanup_apiserver_cert_serial.stdout }}"
+    serial_number: "{{ '%X' | format(_cleanup_apiserver_cert_info.cert.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
-  when: _cleanup_apiserver_cert_stat.stat.exists and _cleanup_apiserver_cert_serial is defined
+  when: _cleanup_apiserver_cert_stat.stat.exists and _cleanup_apiserver_cert_info is defined
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -60,11 +56,9 @@
   become: true
 
 - name: Delete-ipa-cleanup | Extract serial number from kubelet client cert
-  ansible.builtin.shell: |
-    set -o pipefail
-    openssl x509 -in "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt" -serial -noout | cut -d= -f2
-  register: _cleanup_kubelet_cert_serial
-  changed_when: false
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt"
+  register: _cleanup_kubelet_cert_info
   when: _cleanup_kubelet_cert_stat.stat.exists
   become: true
 
@@ -72,11 +66,11 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ _cleanup_kubelet_cert_serial.stdout }}"
+    serial_number: "{{ '%X' | format(_cleanup_kubelet_cert_info.cert.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
-  when: _cleanup_kubelet_cert_stat.stat.exists and _cleanup_kubelet_cert_serial is defined
+  when: _cleanup_kubelet_cert_stat.stat.exists and _cleanup_kubelet_cert_info is defined
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -87,11 +81,9 @@
   become: true
 
 - name: Delete-ipa-cleanup | Extract serial number from front-proxy cert
-  ansible.builtin.shell: |
-    set -o pipefail
-    openssl x509 -in "{{ kubernetes_certificates_path }}/front-proxy-client.crt" -serial -noout | cut -d= -f2
-  register: _cleanup_frontproxy_cert_serial
-  changed_when: false
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/front-proxy-client.crt"
+  register: _cleanup_frontproxy_cert_info
   when: _cleanup_frontproxy_cert_stat.stat.exists
   become: true
 
@@ -99,10 +91,10 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ _cleanup_frontproxy_cert_serial.stdout }}"
+    serial_number: "{{ '%X' | format(_cleanup_frontproxy_cert_info.cert.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
-  when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_serial is defined
+  when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_info is defined
   become: true
   no_log: "{{ secure_logs }}"

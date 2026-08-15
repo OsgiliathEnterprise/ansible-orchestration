@@ -27,12 +27,15 @@
   become: true
 
 - name: Admin-user | Generate an OpenSSL Certificate Signing Request with Subject information
-  ansible.builtin.command: >
-    openssl req -new -key {{ kube_credential_folder }}/kubeadm.pem
-    -out {{ kube_credential_folder }}/kubeadm.csr
-    -subj "/C={{ kube_credential_country_name }}/O=clusterAdministrators/CN=kubeclusteradm/emailAddress={{ kube_credential_email_address }}"
+  community.crypto.openssl_csr:
+    privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "clusterAdministrators"
+    common_name: "kubeclusteradm"
+    email_address: "{{ kube_credential_email_address }}"
+    path: "{{ kube_credential_folder }}/kubeadm.csr"
+    use_common_name_for_san: false
   become: true
-  changed_when: false
 
 - name: Admin-user | Check that the admin cert exists
   ansible.builtin.stat:
