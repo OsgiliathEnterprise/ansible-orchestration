@@ -72,14 +72,14 @@
             create: true
             lvmetanames:
               - lvname: nfs_exposed
-                size: 4M
+                size: 512M
                 create: true
                 filesystem: xfs
                 expose_nfs: True
                 mntp: /var/nfs/csi
                 mount: true
               - lvname: nfs_exposed2
-                size: 4M
+                size: 512M
                 create: true
                 filesystem: xfs
                 expose_nfs: True
