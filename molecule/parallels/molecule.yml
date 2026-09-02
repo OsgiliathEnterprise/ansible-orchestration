@@ -50,7 +50,7 @@ provisioner:
   name: ansible
   env:
     ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${HOME}/.ansible/collections:/usr/share/ansible/collections"
-    ANSIBLE_VERBOSITY: 2
+    ANSIBLE_VERBOSITY: 1
   config_options:
     defaults:
       remote_tmp: /tmp
