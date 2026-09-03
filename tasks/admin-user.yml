@@ -51,18 +51,18 @@
    - not orchestration_admin_cert.stat.exists
   become: true
 
-# IPA PKI path: use ipacert module for admin cert signing
+# IPA PKI path: create admin principal via ipauser module, sign cert via ipacert module
 - name: Admin-user | create user principal for admin cert (IPA PKI)
-  ansible.builtin.shell: |
-    set -o pipefail
-    printf '%s\n%s\n' '{{ company_realm_password }}' '{{ company_realm_password }}' | ipa user-add kubeclusteradm --first=kube --last=ClusterAdmin --email={{ kube_credential_email_address }} --password
+  freeipa.ansible_freeipa.ipauser:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name: "kubeclusteradm"
+    first: "kube"
+    last: "ClusterAdmin"
+    email: "{{ kube_credential_email_address }}"
+    password: "{{ company_realm_password }}"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
-  changed_when: false
-  failed_when: false
-  when:
-   - not orchestration_admin_cert.stat.exists
 
 - name: Admin-user | request admin certificate from IPA (IPA PKI)
   freeipa.ansible_freeipa.ipacert:
