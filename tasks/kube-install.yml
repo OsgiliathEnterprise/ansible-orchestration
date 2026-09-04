@@ -76,6 +76,8 @@
 # (IPAServer scale-down, ipa-certs, ipa-pki-swap, ipa-certs-reapply) completes.
 # This avoids the race condition where the ConfigMap CA changes between hash
 # computation and join execution.
+# kubernetes_join_command is set empty below on purpose to disable the built-in node
+# join in tcharl.kubernetes (node-setup.yml only joins when it is non-empty).
 
 - name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:

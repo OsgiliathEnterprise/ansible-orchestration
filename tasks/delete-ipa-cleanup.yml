@@ -16,7 +16,7 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ '%X' | format(_cleanup_admin_cert_info.cert.serial_number) }}"
+    serial_number: "{{ '%X' | format(_cleanup_admin_cert_info.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
@@ -41,7 +41,7 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ '%X' | format(_cleanup_apiserver_cert_info.cert.serial_number) }}"
+    serial_number: "{{ '%X' | format(_cleanup_apiserver_cert_info.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
@@ -66,7 +66,7 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ '%X' | format(_cleanup_kubelet_cert_info.cert.serial_number) }}"
+    serial_number: "{{ '%X' | format(_cleanup_kubelet_cert_info.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
@@ -91,7 +91,7 @@
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
-    serial_number: "{{ '%X' | format(_cleanup_frontproxy_cert_info.cert.serial_number) }}"
+    serial_number: "{{ '%X' | format(_cleanup_frontproxy_cert_info.serial_number) }}"
     state: revoked
     reason: 4
   failed_when: false
