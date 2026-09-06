@@ -110,14 +110,13 @@ The IPA PKI certificate generation and swap tasks SHALL complete after the `kube
 - **THEN** component configs are patched to trust the IPA CA
 - **THEN** the API server static pod is restarted to pick up new certificates
 
-### Requirement: ConfigMap is re-applied after API server stabilization
-After the API server static pod restarts, the `cluster-info` ConfigMap SHALL be re-applied with the IPA CA certificate. The API server may reset the ConfigMap during startup reconciliation, so the re-application must occur after the API server is fully ready.
+### Requirement: API server serves traffic after PKI swap
+After the static pods are restarted following the PKI certificate swap, the system SHALL verify that port 6443 accepts connections and that `kube-controller-manager` reports Ready before proceeding.
 
-#### Scenario: ConfigMap has IPA CA after re-apply
-- **WHEN** the role runs and the API server has restarted
-- **THEN** the `cluster-info` ConfigMap is updated with the IPA CA certificate
-- **THEN** the ConfigMap's CA issuer matches `kubernetes-ca`
-- **THEN** the join command is reconstructed with the correct CA hash from the ConfigMap
+#### Scenario: API server ready after swap
+- **WHEN** the role runs on a master and the API server static pod has been restarted with new certificates
+- **THEN** port 6443 accepts TCP connections (retried until available)
+- **THEN** `kubectl get pods -n kube-system` shows `kube-controller-manager` in Ready state
 
 ### Requirement: Admin cert is verifiable as IPA-signed
 A testinfra test SHALL verify that the admin certificate at `/home/kubecreds/kubeadm.crt` was issued by the IPA `kubernetes-ca`.

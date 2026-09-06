@@ -73,7 +73,7 @@
 
 # Pre-join CA hash computation removed.
 # Node join is now handled by kube-install-join-node.yml after master post-processing
-# (IPAServer scale-down, ipa-certs, ipa-pki-swap, ipa-certs-reapply) completes.
+# (IPAServer scale-down, ipa-certs, ipa-pki-swap) completes.
 # This avoids the race condition where the ConfigMap CA changes between hash
 # computation and join execution.
 # kubernetes_join_command is set empty below on purpose to disable the built-in node

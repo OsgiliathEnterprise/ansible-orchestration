@@ -57,11 +57,6 @@
   when:
     - kube_masters_group in group_names
 
-- name: Re-apply ConfigMap with IPA CA after API server stabilization
-  ansible.builtin.include_tasks: ipa-certs-reapply.yml
-  when:
-    - kube_masters_group in group_names
-
 - name: Firewalld configuration for kube
   ansible.builtin.include_tasks: kube-firewall.yml
   when:

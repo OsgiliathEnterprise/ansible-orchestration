@@ -19,6 +19,7 @@ dev = [
     "yamllint",
     "tox",
     "pytest-testinfra",
+    "paramiko",
     "python-vagrant",
     "molecule>=24.0.0,<25.0",
     "molecule-plugins[vagrant]",
