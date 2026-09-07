@@ -15,17 +15,10 @@
 
 - name: Destroy-kubelet-volumes | unmount
   ansible.posix.mount:
-    path: "{{ mounted_volume | map(attribute='path') }}"
+    path: "{{ mounted_volume }}"
     state: absent
-  loop: "{{ kube_volume.files | default([]) | list }}" # avoids ansible proxying string when array is one
+  loop: "{{ kube_volume.files | default([]) | map(attribute='path') | list }}" # avoids ansible proxying string when array is one
   loop_control:
     loop_var: mounted_volume
-  when: kube_volume.files | length > 1
-  become: Yes
-
-- name: Destroy-kubelet-volumes | unmount
-  ansible.posix.mount:
-    path: "{{ kube_volume.files[0].path }}"
-    state: absent
-  when: kube_volume.files | length == 1
+  when: kube_volume.files | length >= 1
   become: Yes

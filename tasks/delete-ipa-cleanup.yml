@@ -1,0 +1,100 @@
+---
+- name: Delete-ipa-cleanup | Check admin cert existence
+  ansible.builtin.stat:
+    path: "{{ kube_credential_folder }}/kubeadm.crt"
+  register: _cleanup_admin_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from admin cert
+  community.crypto.x509_certificate_info:
+    path: "{{ kube_credential_folder }}/kubeadm.crt"
+  register: _cleanup_admin_cert_info
+  when: _cleanup_admin_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke admin certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ '%X' | format(_cleanup_admin_cert_info.serial_number) }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_admin_cert_stat.stat.exists and _cleanup_admin_cert_info is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check apiserver cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/apiserver.crt"
+  register: _cleanup_apiserver_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from apiserver cert
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/apiserver.crt"
+  register: _cleanup_apiserver_cert_info
+  when: _cleanup_apiserver_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke apiserver certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ '%X' | format(_cleanup_apiserver_cert_info.serial_number) }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_apiserver_cert_stat.stat.exists and _cleanup_apiserver_cert_info is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check kubelet client cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt"
+  register: _cleanup_kubelet_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from kubelet client cert
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/apiserver-kubelet-client.crt"
+  register: _cleanup_kubelet_cert_info
+  when: _cleanup_kubelet_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke kubelet client certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ '%X' | format(_cleanup_kubelet_cert_info.serial_number) }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_kubelet_cert_stat.stat.exists and _cleanup_kubelet_cert_info is defined
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Delete-ipa-cleanup | Check front-proxy cert existence
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}/front-proxy-client.crt"
+  register: _cleanup_frontproxy_cert_stat
+  become: true
+
+- name: Delete-ipa-cleanup | Extract serial number from front-proxy cert
+  community.crypto.x509_certificate_info:
+    path: "{{ kubernetes_certificates_path }}/front-proxy-client.crt"
+  register: _cleanup_frontproxy_cert_info
+  when: _cleanup_frontproxy_cert_stat.stat.exists
+  become: true
+
+- name: Delete-ipa-cleanup | Revoke front-proxy certificate from IPA using serial number
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    serial_number: "{{ '%X' | format(_cleanup_frontproxy_cert_info.serial_number) }}"
+    state: revoked
+    reason: 4
+  failed_when: false
+  when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_info is defined
+  become: true
+  no_log: "{{ secure_logs }}"

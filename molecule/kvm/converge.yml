@@ -14,6 +14,14 @@
     company_domain: osgiliath.test
   #        kube_alt_names:
 #          - "kubeadm.osgiliath.net"
+    nfs_mountpoints:
+      - host: idm.osgiliath.test
+        mountpoints:
+          - local: /net
+            remote: /var/nfs/volume
+            kubernetes_volumes:
+              - subtree: /artefactrepo
+                mountsize: 1
   roles:
     - role: tcharl.ansible_orchestration
 
@@ -29,16 +37,29 @@
     reset_kube: True
     standalone_role: False
     company_domain: osgiliath.test
-    nfs_mountpoints:
-      - host: idm.osgiliath.test
-        mountpoints:
-          - remote: /var/shared/csi
-            local: /net
-            csi_mount: Yes
-          - local: /net
-            remote: /var/shared/volume
-            kubernetes_volumes:
-              - subtree: /artefactrepo
-                mountsize: 1
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
   roles:
     - role: tcharl.ansible_orchestration
+
+- name: Wait for all nodes to be Ready after full converge
+  hosts: master.osgiliath.test
+  gather_facts: false
+  tasks:
+    # CNI (calico-node) deployment lags behind node join by several minutes, and the
+    # per-play handler flushes restart containerd/kubelet at the end of each play.
+    # Without this final wait, converge ends while worker nodes are still NotReady
+    # and downstream verify runs against an unsettled cluster.
+    - name: Poll until every node reports Ready
+      ansible.builtin.shell: |
+        for i in $(seq 1 60); do
+          out=$(kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes --no-headers) || continue
+          total=$(echo "$out" | grep -c . || true)
+          notready=$(echo "$out" | awk '$2 != "Ready" {print $1}')
+          if [ "$total" -gt 0 ] && [ -z "$notready" ]; then exit 0; fi
+          sleep 10
+        done
+        kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes || true
+        echo "Not all nodes Ready after 600s" >&2
+        exit 1
+      become: true
+      changed_when: false

@@ -1,6 +1,4 @@
 ---
-# TODO This phase fails once
-
 - name: Prepare IDM
   hosts:
     - idm.osgiliath.test
@@ -18,7 +16,7 @@
         idm_preferred_nic: "enp0s5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
-- name: Prepare
+- name: Prepare secure the hosts
   hosts:
     - master.osgiliath.test
     - node1.osgiliath.test
@@ -51,9 +49,9 @@
         idm_preferred_nic: "enp0s5"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
-- name: Prepare NFS server on Master
+- name: Prepare NFS server on IDM
   hosts:
-    - master.osgiliath.test
+    - idm.osgiliath.test
   tasks:
     - include_role:
         name: tcharl.nfs_server
@@ -72,12 +70,13 @@
             create: true
             lvmetanames:
               - lvname: nfs_exposed
-                size: 4M
+                size: 4G
                 create: true
                 filesystem: xfs
                 expose_nfs: True
-                mntp: /var/nfs
-                mount: true
+                mntp: /var/nfs/volume
+                sec: "*(rw,no_root_squash,no_subtree_check)"
+                csi_mount: true
         manage_lvm: true
         configure_nfs: True
 

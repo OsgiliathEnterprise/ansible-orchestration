@@ -1,6 +1,4 @@
 ---
-# TODO This phase fails once
-
 - name: Prepare IDM
   hosts:
     - idm.osgiliath.test
@@ -41,7 +39,7 @@
         idm_preferred_nic: "eth1"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
-- name: Prepare Nodes
+- name: Prepare DNS
   hosts:
     - all
   tasks:
@@ -52,8 +50,53 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "eth1"
         company_domain: osgiliath.test
+        preferred_nic: "eth1"
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+- name: Prepare NFS server on Master
+  hosts:
+    - idm.osgiliath.test
+  tasks:
+    - include_role:
+        name: tcharl.nfs_server
+      vars:
+        standalone_role: False
+        secure_logs: False
+        company_domain: osgiliath.test
+        preferred_nic: "eth1"
+        idm_preferred_nic: "eth1"
+        company_realm_password: '123ADMin'
+        company_ad_password: '123ADmPass'
+        lvm_groups:
+          - vgname: non-persistent
+            disks:
+              - /dev/sdb
+            create: true
+            lvmetanames:
+              - lvname: nfs_exposed
+                size: 4G
+                create: true
+                filesystem: xfs
+                expose_nfs: True
+                mntp: /var/nfs/volume
+                sec: "*(rw,no_root_squash,no_subtree_check)"
+                csi_mount: true
+        manage_lvm: true
+        configure_nfs: True
+
+- name: Prepare NFS client on Node
+  hosts:
+    - node1.osgiliath.test
+  tasks:
+    - include_role:
+        name: tcharl.nfs_client
+      vars:
+        standalone_role: False
+        secure_logs: False
+        company_domain: osgiliath.test
+        preferred_nic: "eth1"
         idm_preferred_nic: "eth1"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'

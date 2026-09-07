@@ -1,5 +1,10 @@
 ---
 
+- name: Ipa-certs | kerberos safeguard
+  ansible.builtin.command: kinit -kt /etc/krb5.keytab
+  become: true
+  changed_when: false
+
 - name: Ipa-certs | create kubernetes pki directory
   ansible.builtin.file:
     path: "{{ kubernetes_certificates_path }}"
@@ -9,46 +14,187 @@
     mode: '0755'
   become: True
 
-- name: Ipa-certs | Check that the kube ca exists
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}ca.crt"
-  register: kube_ca_result
+- name: Ipa-certs | backup kubeadm self-signed ca
+  ansible.builtin.copy:
+    src: "{{ kubernetes_certificates_path }}ca.crt"
+    dest: "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
+    mode: '0640'
+    remote_src: yes
+  failed_when: false
+  become: true
 
 - name: Ipa-certs | delegate kubernetes ca creation to IPA
   ansible.builtin.include_tasks: ipa-kubernetes-ca.yml
-  when:
-   - not kube_ca_result.stat.exists
 
-- name: Ipa-certs | download ca
+- name: Ipa-certs | download ca from IPA to temp location
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt
-  when:
-   - not kube_ca_result.stat.exists
+    ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt.new
   no_log: "{{ secure_logs }}"
-  changed_when: False
+  changed_when: false
   become: true
 
-- name: Ipa-certs | create principals for master
+- name: Ipa-certs | verify ca.crt.new fingerprint matches expected IPA CA
+  ansible.builtin.shell: |
+    set -euo pipefail
+    openssl x509 -in {{ kubernetes_certificates_path }}ca.crt.new -noout -fingerprint -sha256 2>/dev/null | tr -d ':' | tr '[:upper:]' '[:lower:]' | sed 's/sha256 fingerprint=//'
+  become: true
+  changed_when: false
+
+- name: Ipa-certs | read kubeadm CA certificate for bundle
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
+  register: ca_bundle_kubeadm
+  become: true
+
+- name: Ipa-certs | read IPA CA certificate for bundle
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_certificates_path }}ca.crt.new"
+  register: ca_bundle_ipa
+  become: true
+
+- name: Ipa-certs | create merged CA bundle (kubeadm + IPA) for client auth
+  ansible.builtin.copy:
+    content: "{{ ca_bundle_kubeadm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
+    dest: "{{ kubernetes_certificates_path }}ca-bundle.crt"
+    owner: root
+    mode: '0644'
+  become: true
+
+- name: Ipa-certs | replace CA cert with IPA CA
+  ansible.builtin.copy:
+    src: "{{ kubernetes_certificates_path }}ca.crt.new"
+    dest: "{{ kubernetes_certificates_path }}ca.crt"
+    remote_src: yes
+    mode: '0644'
+  become: true
+
+- name: Ipa-certs | update API server static pod to use merged CA bundle for client auth
+  ansible.builtin.replace:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    regexp: '--client-ca-file=/etc/kubernetes/pki/ca\.crt'
+    replace: '--client-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
+  become: true
+
+- name: Ipa-certs | update controller-manager client CA to merged bundle
+  ansible.builtin.replace:
+    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
+    regexp: '--client-ca-file=/etc/kubernetes/pki/ca\.crt'
+    replace: '--client-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
+  become: true
+
+- name: Ipa-certs | update controller-manager cluster signing CA to retained kubeadm CA
+  ansible.builtin.replace:
+    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
+    regexp: '--cluster-signing-cert-file=/etc/kubernetes/pki/ca\.crt(?!\.kubeadm)'
+    replace: '--cluster-signing-cert-file=/etc/kubernetes/pki/ca.crt.kubeadm'
+  become: true
+
+- name: Ipa-certs | update controller-manager root CA to merged bundle
+  ansible.builtin.replace:
+    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
+    regexp: '--root-ca-file=/etc/kubernetes/pki/ca\.crt'
+    replace: '--root-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
+  become: true
+
+- name: Ipa-certs | update scheduler to use merged CA bundle for root CA
+  ansible.builtin.replace:
+    path: /etc/kubernetes/manifests/kube-scheduler.yaml
+    regexp: '--root-ca-file=/etc/kubernetes/pki/ca\.crt'
+    replace: '--root-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
+  become: true
+
+- name: Ipa-certs | wait for API server to restart after static pod update
+  ansible.builtin.uri:
+    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
+    validate_certs: no
+    status_code: 200
+  become: true
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  register: api_server_ready
+  until: api_server_ready.status == 200
+
+- name: Ipa-certs | create IPA service principal for master hostname
   ansible.builtin.include_tasks: ipa-master.yml
 
-- name: Ipa-certs | Check that the kube ca exists
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}apiserver.crt"
-  register: kube_apiserver_result
+- name: Ipa-certs | remove kubeadm apiserver cert so IPA-signed one is created
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kubernetes_certificates_path }}apiserver.crt"
+    - "{{ kubernetes_certificates_path }}apiserver.key"
+    - "{{ kubernetes_certificates_path }}apiserver.csr"
+  become: true
 
-- name: Ipa-certs | create apiserver cert
+- name: Ipa-certs | create apiserver cert signed by IPA
   ansible.builtin.include_tasks: ipa-api-server.yml
-  when:
-   - not kube_apiserver_result.stat.exists
 
-- name: Ipa-certs | Check kubelet cert exists
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}kube-apiserver-kubelet-client.crt"
-  register: kube_apiserver_kubelet_client_result
+- name: Ipa-certs | create front-proxy client cert
+  ansible.builtin.include_tasks: ipa-front-proxy.yml
 
 - name: Ipa-certs | create kubelet client certs
   ansible.builtin.include_tasks: kube-apiserver-kubelet-client.yml
+
+- name: Ipa-certs | Check SA key exists
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}sa.key"
+  register: kube_sa_key_result
+
+- name: Ipa-certs | generate SA key
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_certificates_path }}sa.key"
+    mode: '0600'
+    owner: root
+    group: root
+    type: Ed25519
+    size: 256
   when:
-   - not kube_apiserver_kubelet_client_result.stat.exists
-# TODO continue the exercize
+   - not kube_sa_key_result.stat.exists
+  become: true
+
+- name: Ipa-certs | restart API server to pick up new IPA-signed certificate
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    state: touch
+  become: true
+
+- name: Ipa-certs | wait for API server to restart with new certificate
+  ansible.builtin.uri:
+    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
+    validate_certs: no
+    status_code: 200
+  become: true
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  register: result
+  until: result.status == 200
+
+# Shell exception: community.crypto 3.3.0 has no certificate chain validation
+# module (x509_certificate_info parses certificate fields only, it cannot verify
+# that apiserver.crt chains to the new CA), so this task stays a shell command.
+- name: Ipa-certs | verify API server cert chain is valid
+  ansible.builtin.shell: |
+    openssl verify -CAfile /etc/kubernetes/pki/ca.crt /etc/kubernetes/pki/apiserver.crt
+  become: true
+  changed_when: false
+  register: cert_chain_verify
+  retries: 3
+  delay: 5
+  until: cert_chain_verify.rc == 0
+
+- name: Ipa-certs | verify kubectl can connect to API server (best effort, final check in ipa-pki-swap)
+  ansible.builtin.shell: |
+    kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info 2>&1
+  become: true
+  changed_when: false
+  failed_when: false
+  register: kubectl_cluster_info
+  retries: 3
+  delay: 10
+  until: kubectl_cluster_info.rc == 0
+
+- name: Ipa-certs | show kubectl cluster-info output
+  ansible.builtin.debug:
+    var: kubectl_cluster_info.stdout_lines

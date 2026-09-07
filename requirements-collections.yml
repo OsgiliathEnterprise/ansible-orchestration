@@ -5,4 +5,5 @@ collections:
   - name: community.general
   - name: kubernetes.core
   - name: ansible.posix
-  - name: ansible.netcommon
+    version: "2.2.0"
+  # - name: ansible.netcommon  # Temporarily disabled - hash mismatch with galaxy

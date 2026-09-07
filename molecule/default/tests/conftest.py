@@ -7,11 +7,11 @@ import pytest
 def pytest_runtest_setup(item):
     """Run tests only when under molecule with testinfra installed."""
     try:
-        import testinfra
+        from testinfra.utils import ansible_runner
     except ImportError:
         pytest.skip("Test requires testinfra", allow_module_level=True)
     if "MOLECULE_INVENTORY_FILE" in os.environ:
-        pytest.testinfra_hosts = testinfra.utils.ansible_runner.AnsibleRunner(
+        pytest.testinfra_hosts = ansible_runner.AnsibleRunner(
             os.environ["MOLECULE_INVENTORY_FILE"]
         ).get_hosts("all")
     else:

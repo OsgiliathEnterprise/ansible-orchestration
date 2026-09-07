@@ -6,5 +6,12 @@
   when:
    - kube_masters_group in group_names
 
+- name: Delete | Revoke IPA certificates and cleanup IPA resources
+  ansible.builtin.include_tasks: delete-ipa-cleanup.yml
+  run_once: True
+  when:
+   - kube_masters_group in group_names
+   - reset_kube
+
 - name: Delete | Destroying kube
   ansible.builtin.include_tasks: delete-configuration.yml
