@@ -28,6 +28,20 @@
   loop:
    - "HTTP/{{ orchestration_host_hostname }}"
   failed_when: false
+
+# ipacert also requires an existing service principal for every DNS SAN
+# ("The service principal for subject alt name X ... does not exist").
+
+- name: Ipa-api-server | configure http services for SAN alias names (satisfies ipacert service principal check)
+  freeipa.ansible_freeipa.ipaservice:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name: "{{ item }}"
+    skip_host_check: True
+  delegate_to: "{{ groups[idm_group][0] }}"
+  no_log: "{{ secure_logs }}"
+  loop:
+   - "HTTP/kubernetes-svc.{{ company_domain }}"
+   - "HTTP/kubernetes-master.{{ company_domain }}"
   changed_when: false
 
 - name: Ipa-api-server | create apiserver certs
@@ -43,7 +57,7 @@
     organization_name: "{{ company_domain }}"
     email_address: "{{ kube_credential_email_address }}"
     common_name: "{{ orchestration_host_hostname }}"
-    subject_alt_name: "{{ ['DNS:' + (orchestration_host_hostname), 'IP:' + ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)), 'IP:' + (orchestration_master_ip)] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
+    subject_alt_name: "{{ ['DNS:' + (orchestration_host_hostname), 'DNS:kubernetes-svc.' + company_domain, 'DNS:kubernetes-master.' + company_domain, 'IP:' + ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)), 'IP:' + (orchestration_master_ip)] + (kube_alt_names | default([]) | map('regex_replace', '^', 'DNS:') | unique) }}"
     key_usage:
       - digitalSignature
       - keyEncipherment
