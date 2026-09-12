@@ -1,0 +1,10 @@
+---
+
+- name: Nfs-mountpoints (inner) | process each volume from server group
+  ansible.builtin.include_tasks: persistent-volume.yml
+  loop: "{{ _outer_server_group.mountpoints | selectattr('kubernetes_volumes', 'defined') | subelements(['kubernetes_volumes']) }}"
+  loop_control:
+    loop_var: vol_item
+  vars:
+    nfs_mountpoint: "{{ {'nfs_server': _outer_server_group.host} | combine(vol_item.0) }}"
+    kube_volume_to_mount: "{{ vol_item.1 }}"

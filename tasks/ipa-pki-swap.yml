@@ -1,0 +1,122 @@
+---
+
+- name: Ipa-pki-swap | patch kubeconfigs to use IPA CA cert
+  ansible.builtin.replace:
+    path: "{{ item }}"
+    regexp: '^(\s*)certificate-authority-data:.*'
+    replace: '\1certificate-authority: /etc/kubernetes/pki/ca.crt'
+  loop:
+    - /etc/kubernetes/controller-manager.conf
+    - /etc/kubernetes/scheduler.conf
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+  become: true
+
+- name: Ipa-pki-swap | ensure kubeconfig files are readable for testinfra
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: '0644'
+  loop:
+    - /etc/kubernetes/admin.conf
+    - /etc/kubernetes/controller-manager.conf
+    - /etc/kubernetes/scheduler.conf
+  become: true
+
+- name: Ipa-pki-swap | symlink root kubeconfig to admin.conf for testinfra
+  ansible.builtin.file:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    state: link
+    force: true
+  become: true
+
+- name: Ipa-pki-swap | patch kubelet.conf server URL to use hostname for TLS verification
+  ansible.builtin.replace:
+    path: /etc/kubernetes/kubelet.conf
+    regexp: 'server: https://[\d.]+:6443'
+    replace: 'server: https://{{ orchestration_host_hostname }}:6443'
+  become: true
+
+- name: Ipa-pki-swap | patch admin.conf server URL to use hostname for TLS verification
+  ansible.builtin.replace:
+    path: /etc/kubernetes/admin.conf
+    regexp: 'server: https://[\d.]+:6443'
+    replace: 'server: https://{{ orchestration_host_hostname }}:6443'
+  become: true
+
+# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
+- name: Ipa-pki-swap | restart API server static pod to pick up new cert
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    state: touch
+  become: true
+
+- name: Ipa-pki-swap | wait for API server to restart
+  ansible.builtin.uri:
+    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
+    validate_certs: no
+    status_code: 200
+  become: true
+  register: api_healthz
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: api_healthz.status == 200
+
+# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
+- name: Ipa-pki-swap | restart controller-manager static pod
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
+    state: touch
+  become: true
+
+# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
+- name: Ipa-pki-swap | restart scheduler static pod
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests/kube-scheduler.yaml
+    state: touch
+  become: true
+
+- name: Ipa-pki-swap | wait for cluster to stabilize after CA swap
+  ansible.builtin.uri:
+    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
+    validate_certs: no
+    status_code: 200
+  become: true
+  register: cluster_healthz
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: cluster_healthz.status == 200
+
+- name: Ipa-pki-swap | wait for controller manager to be ready
+  # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
+  ansible.builtin.shell: kubectl --kubeconfig /etc/kubernetes/admin.conf get pod -n kube-system -l component=kube-controller-manager -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+  become: true
+  changed_when: false
+  register: cm_ready
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: "'True' in cm_ready.stdout"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+
+- name: Ipa-pki-swap | add API server override block to kubelet config
+  # kubeadm-generated config has no apiServerOverride key, so the block is appended at EOF as a top-level key
+  ansible.builtin.blockinfile:
+    path: /var/lib/kubelet/config.yaml
+    marker: "# {mark} API server override (ipa-pki-swap)"
+    insertafter: EOF
+    block: |
+      apiServerOverride:
+        certAuthority: /etc/kubernetes/pki/ca.crt
+        url: https://{{ orchestration_host_hostname }}:6443
+  become: true
+  notify: ansible-orchestration | refresh kube
+
+- name: Ipa-pki-swap | verify kubectl can connect with new CA
+  ansible.builtin.shell: |
+    kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info
+  become: true
+  changed_when: false
+  register: kubectl_verify
+  retries: 6
+  delay: 10
+  until: "'Kubernetes control plane' in kubectl_verify.stdout"

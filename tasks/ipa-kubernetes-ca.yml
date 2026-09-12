@@ -1,11 +1,20 @@
 ---
 
+- name: Ipa-kubernetes-ca | ensure Kerberos ticket is valid
+  ansible.builtin.shell: |
+    set -euo pipefail
+    echo '{{ company_realm_password }}' | kinit admin
+  delegate_to: "{{ groups[idm_group] | first }}"
+  changed_when: false
+  become: true
+  no_log: true
+
 - name: Ipa-kubernetes-ca | check if kube generic ca exists
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa ca-find | grep -c ': kubernetes-ca'
   register: ipa_kubernetes_ca_exists
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   failed_when: False
   changed_when: False
@@ -13,86 +22,77 @@
 
 - name: Ipa-kubernetes-ca | create ip lightweight ca
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin  > /dev/null
+    set -o pipefail
     ipa ca-add kubernetes-ca --subject "CN=kubernetes-ca,O={{ company_domain | upper }}"
   when:
-   - not ipa_kubernetes_ca_exists.stdout == '1'
-  delegate_to: "{{ groups[idm_group][0] }}"
+    - not ipa_kubernetes_ca_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_kubernetes_ca_exists.stdout == '1'
   become: true
 
-- name: Ipa-kubernetes-ca | check if kube ca accl exists
+- name: Ipa-kubernetes-ca | check if kube ca acl exists
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa caacl-find | grep -c ': kubernetes-ca-acl'
   register: ipa_kubernetes_ca_acl_exists
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   failed_when: False
   changed_when: False
   become: true
 
-- name: Ipa-kubernetes-ca | create kube admin ca access list category
+- name: Ipa-kubernetes-ca | create kube admin ca access list
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa caacl-add kubernetes-ca-acl --hostcat=all --servicecat=all --usercat=all
-  when: # TODO create hostcat and servicecat for better control
-   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+    set -o pipefail
+    ipa caacl-add kubernetes-ca-acl --usercat=all
+  when:
+    - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_kubernetes_ca_acl_exists.stdout == '1'
   become: true
 
 - name: Ipa-kubernetes-ca | add kube-ca to ca-acl
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin
+    set -o pipefail
     ipa caacl-add-ca kubernetes-ca-acl --ca kubernetes-ca
   when:
-   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+    - not ipa_kubernetes_ca_acl_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_kubernetes_ca_acl_exists.stdout == '1'
   become: true
 
 - name: Ipa-kubernetes-ca | check if kube ca group exists
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa group-find | grep -c ': kubernetes-administrators'
   register: ipa_group_kubeadm_exists
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   failed_when: False
   changed_when: False
   become: true
 
-- name: Ipa-kubernetes-ca | create ipa administrators
+- name: Ipa-kubernetes-ca | create kubernetes administrators group
   freeipa.ansible_freeipa.ipagroup:
     ipaadmin_password: "{{ company_realm_password }}"
     name: "kubernetes-administrators"
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   when:
-   - not ipa_group_kubeadm_exists.stdout == '1'
+    - not ipa_group_kubeadm_exists.stdout == '1'
 
-# - name: ansible-orchestration | ipa-kubernetes-ca | create the kubernetes ca-acl
-#  shell: |
-#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-#    ipa caacl-add-user kubernetes-ca-acl --groups=kubernetes-administrators
-#  when:
-#   - not ipa_kubernetes_ca_acl_exists.stdout == '1'
-#   - not ipa_group_kubeadm_exists.stdout == '1'
-#  no_log: "{{ secure_logs }}"
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  changed_when: False
-#  become: true
-
-- name: Ipa-kubernetes-ca | check if kube ca group exists
+- name: Ipa-kubernetes-ca | check if kubeAdministrators cert profile exists
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa certprofile-find | grep -c ': kubeAdministrators'
   register: ipa_certprofile_kubeadm_exists
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   failed_when: False
   changed_when: False
@@ -100,13 +100,14 @@
 
 - name: Ipa-kubernetes-ca | get the ipa default ca profile
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa certprofile-show --out /tmp/ipa_default_ca_profile.cfg caIPAserviceCert
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_certprofile_kubeadm_exists.stdout == '1'
   become: true
 
 - name: Ipa-kubernetes-ca | replace the ipa ca default profile id with the kubeadmin one
@@ -115,11 +116,10 @@
     regexp: '^profileId='
     line: profileId=kubeAdministrators
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
-  no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
 
 - name: Ipa-kubernetes-ca | set the profile visible
   ansible.builtin.lineinfile:
@@ -127,11 +127,10 @@
     regexp: '^visible='
     line: visible=true
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
-  no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
 
 - name: Ipa-kubernetes-ca | adapt the csr organization from csr
   ansible.builtin.lineinfile:
@@ -139,30 +138,175 @@
     regexp: "{{ 'policyset.serverCertSet.1.default.params.name' | regex_escape() }}.*"
     line: policyset.serverCertSet.1.default.params.name=CN=$request.req_subject_name.cn$, O=system:masters
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
-  no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | allow IP SANs by relaxing subject alt name restrictions
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_default_ca_profile.cfg
+    regexp: '^subjectAltName='
+    line: subjectAltName=$request.req_subject_alt_name$
+  when:
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | disable Dogtag reachability validation for IP SANs
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_default_ca_profile.cfg
+    line: "disableDogtagReachabilityValidation=true"
+    state: present
+  when:
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | add kube service cluster IP to IPA server hosts for Dogtag reachability check
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)) }} {{ orchestration_host_hostname }}"
+    state: present
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
 
-- name: Ipa-kubernetes-ca | import the according kubernetes admin profile
+- name: Ipa-kubernetes-ca | add master node IP to IPA server hosts for Dogtag reachability check
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ orchestration_master_ip }} {{ orchestration_host_hostname }}"
+    state: present
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
+# FreeIPA's ipacert request runs _validate_san_ips unconditionally (FreeIPA
+# layer): every IP SAN needs a forward-reachable IPA-managed A record under a
+# name that is also in the same SAN set, plus a matching IPA-managed PTR
+# record. The zone, A and PTR records below are load-bearing: without them
+# the request fails ("IP address in subjectAltName ... unreachable from DNS
+# names" / "does not have PTR record"). The alias names are added to the
+# apiserver CSR SAN set in ipa-api-server.yml. The profile flag and
+# /etc/hosts entries above cover only the Dogtag layer
+# (disableDogtagReachabilityValidation) and do not affect this FreeIPA-layer
+# check.
+
+- name: Ipa-kubernetes-ca | ensure reverse zone for service cluster IP exists
+  freeipa.ansible_freeipa.ipadnszone:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)).split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
+    state: present
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | ensure reverse zone for master node IP exists
+  freeipa.ansible_freeipa.ipadnszone:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - "{{ orchestration_master_ip.split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
+    state: present
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | create A record for service cluster IP alias (satisfies _validate_san_ips forward reachability)
+  freeipa.ansible_freeipa.ipadnsrecord:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - kubernetes-svc
+    zone_name: "{{ company_domain }}"
+    record_type: A
+    record_value:
+      - "{{ (kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1) }}"
+  delegate_to: "{{ groups[idm_group][0] }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | create A record for master node IP alias (satisfies _validate_san_ips forward reachability)
+  freeipa.ansible_freeipa.ipadnsrecord:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - kubernetes-master
+    zone_name: "{{ company_domain }}"
+    record_type: A
+    record_value:
+      - "{{ orchestration_master_ip }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+# Create the PTR records. When the reverse zone comes into existence or a
+# host is enrolled with an IP in the zone, IPA back-fills a relative-name
+# PTR for the host IP (e.g. "master"). _validate_san_ips requires *every*
+# PTR value for a SAN IP to be a SAN name resolving to that IP, so the
+# back-filled short name must be removed. The removal targets only the
+# short-name value (no-op when absent, hence idempotent); the create is
+# additive and never replaces. Non-host IPs (service cluster IP) are never
+# back-filled, so no removal is needed there.
+
+- name: Ipa-kubernetes-ca | create PTR record for service cluster IP alias
+  freeipa.ansible_freeipa.ipadnsrecord:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)).split('.')[-1] }}"
+    zone_name: "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)).split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
+    record_type: PTR
+    record_value:
+      - "kubernetes-svc.{{ company_domain }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | remove back-filled host shortname from PTR record for master node IP
+  freeipa.ansible_freeipa.ipadnsrecord:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - "{{ orchestration_master_ip.split('.')[-1] }}"
+    zone_name: "{{ orchestration_master_ip.split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
+    record_type: PTR
+    record_value:
+      - "{{ orchestration_host_hostname.split('.')[0] }}"
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | create PTR record for master node IP alias
+  freeipa.ansible_freeipa.ipadnsrecord:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name:
+      - "{{ orchestration_master_ip.split('.')[-1] }}"
+    zone_name: "{{ orchestration_master_ip.split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
+    record_type: PTR
+    record_value:
+      - "kubernetes-master.{{ company_domain }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+
+- name: Ipa-kubernetes-ca | import the kubernetes admin profile
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa certprofile-import kubeAdministrators --file /tmp/ipa_default_ca_profile.cfg --desc "Kubernetes administration certificates" --store TRUE
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_certprofile_kubeadm_exists.stdout == '1'
   become: true
 
-- name: Ipa-kubernetes-ca | peer ca kubeAdm profile to ca
+- name: Ipa-kubernetes-ca | link kubeAdministrators profile to ca-acl
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    set -o pipefail
     ipa caacl-add-profile kubernetes-ca-acl --certprofile kubeAdministrators
   when:
-   - not ipa_certprofile_kubeadm_exists.stdout == '1'
+    - not ipa_certprofile_kubeadm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
-  changed_when: False
+  changed_when: >-
+    not ipa_certprofile_kubeadm_exists.stdout == '1'
   become: true

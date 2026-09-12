@@ -15,16 +15,6 @@
     state: restarted
   become: true
 
-# - name: Firewall | Disable firewalld on kubernetes nodes (favor calico network policies)
-#  ansible.builtin.service:
-#    name: firewalld
-#    state: stopped
-#    enabled: no
-#  when: kube_masters_group in group_names or kube_nodes_group in group_names
-#  become: true
-
-# uncomment previous statement, comment the following one and comment the next one to disable firewalld on kubernetes nodes
-
 - name: Firewall | Add node to Sourced trusted zone on masters
   ansible.posix.firewalld:
     zone: "{{ kube_firewall_trusted_zone }}"
@@ -35,7 +25,6 @@
   become: True
   delegate_to: "{{ groups[kube_masters_group][0] }}"
   when: kube_nodes_group in group_names
-
 
 - name: Firewall | Add master to Sourced trusted zone on node
   ansible.posix.firewalld:

@@ -1,0 +1,51 @@
+## ADDED Requirements
+
+### Requirement: Kubernetes sub-CA is created in FreeIPA
+The system SHALL create a `kubernetes-ca` lightweight sub-CA in FreeIPA when `use_ipa_pki` is `true` and the CA does not yet exist.
+
+#### Scenario: kubernetes-ca is created
+- **WHEN** the role runs with `use_ipa_pki: true` and no `kubernetes-ca` exists
+- **THEN** the sub-CA is created with subject `CN=kubernetes-ca,O=<company_domain>`
+- **THEN** the task reports changed
+
+#### Scenario: kubernetes-ca already exists
+- **WHEN** the role runs with `use_ipa_pki: true` and `kubernetes-ca` already exists
+- **THEN** no CA creation is performed and the task reports no change
+
+### Requirement: CA ACL is scoped to Kubernetes
+The system SHALL create a CA ACL that grants certificate request access scoped to Kubernetes hosts and services, not to all hosts.
+
+#### Scenario: CA ACL is created with scoped access
+- **WHEN** the role runs with `use_ipa_pki: true` and no ACL exists
+- **THEN** a CA ACL is created linked to `kubernetes-ca`
+- **THEN** the ACL does NOT use `--hostcat=all` or `--servicecat=all`
+
+#### Scenario: CA ACL already exists
+- **WHEN** the role runs with `use_ipa_pki: true` and the ACL already exists
+- **THEN** no ACL creation is performed and the task reports no change
+
+### Requirement: KubeAdministrators cert profile is created
+The system SHALL create a `kubeAdministrators` certificate profile with `O=system:masters` in the subject organization field.
+
+#### Scenario: Cert profile is created
+- **WHEN** the role runs with `use_ipa_pki: true` and no `kubeAdministrators` profile exists
+- **THEN** the profile is imported with `O=system:masters` in the name parameter
+- **THEN** the profile is linked to the `kubernetes-ca` via the CA ACL
+
+#### Scenario: Cert profile already exists
+- **WHEN** the role runs with `use_ipa_pki: true` and the profile already exists
+- **THEN** no profile import is performed and the task reports no change
+
+### Requirement: IPA PKI infrastructure is gated by use_ipa_pki
+The IPA PKI infrastructure tasks SHALL only execute when `use_ipa_pki` is `true`.
+
+#### Scenario: IPA PKI disabled
+- **WHEN** the role runs without `use_ipa_pki` or with `use_ipa_pki: false`
+- **THEN** no IPA PKI infrastructure tasks are executed
+
+### Requirement: Kerberos ticket is validated before cert operations
+The system SHALL validate that a Kerberos ticket is available before executing certificate operations.
+
+#### Scenario: Kerberos ticket is refreshed
+- **WHEN** the role runs with `use_ipa_pki: true`
+- **THEN** a Kerberos ticket is obtained via keytab before cert operations

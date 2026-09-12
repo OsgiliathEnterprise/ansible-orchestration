@@ -1,7 +1,8 @@
 ---
 
-- name: Nfs-mountpoints | iterate through kubernetes volumes mountpoints on {{ nfs_mountpoint.local }}
-  ansible.builtin.include_tasks: nfs-mountpoint.yml
-  loop: "{{ nfs_mountpoints | default([]) | map(attribute='mountpoints') | flatten | selectattr('kubernetes_volumes', 'defined') }}"
-  loop_control:
-    loop_var: nfs_mountpoint
+- name: Nfs-mountpoints | process each server group
+  ansible.builtin.include_tasks: _server-inner.yml
+  loop: "{{ nfs_mountpoints | default([]) }}"
+  when: item.mountpoints is defined
+  vars:
+    _outer_server_group: "{{ item }}"

@@ -11,7 +11,7 @@
   ansible.builtin.setup:
     gather_subset:
       - network
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   register: masterfacts
 
 - name: Facts | get master facts
@@ -23,7 +23,7 @@
   ansible.builtin.setup:
     gather_subset:
       - network
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   register: idmfacts
 
 - name: Facts | get idm facts
@@ -54,8 +54,7 @@
     orchestration_idm_ip: >-
       {{ idmfacts.ansible_facts['ansible_' ~ (idm_preferred_nic | replace('-', '_'))].ipv4.address
       if idm_preferred_nic is defined and idmfacts.ansible_facts['ansible_' ~ (idm_preferred_nic | replace('-', '_'))] is defined
-      else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}
-    
+      else idmfacts.ansible_facts.ansible_default_ipv4.address | default(idmfacts.ansible_facts.ansible_all_ipv4_addresses[0]) }}    
 
 - name: Facts | Current host ip
   ansible.builtin.debug:
@@ -79,5 +78,5 @@
 
 - name: Facts | IDM ip
   ansible.builtin.debug:
-    msg: orchestration_idm_ip
+    msg: "{{ orchestration_idm_ip }}"
     verbosity: 2

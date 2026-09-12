@@ -1,0 +1,12 @@
+---
+
+- name: Nfs-server-group | iterate through mountpoints for current NFS server group
+  ansible.builtin.include_tasks: nfs-mountpoint.yml
+  loop: "{{ _nfs_server_group.mountpoints }}"
+  when: item.kubernetes_volumes is defined
+  vars:
+    nfs_mountpoint: >-
+      {{
+        item
+        | combine({'nfs_server': _nfs_server_group.host})
+      }}
