@@ -150,7 +150,7 @@
     line: subjectAltName=$request.req_subject_alt_name$
   when:
     - not ipa_certprofile_kubeadm_exists.stdout == '1'
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
 
@@ -161,16 +161,16 @@
     state: present
   when:
     - not ipa_certprofile_kubeadm_exists.stdout == '1'
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   changed_when: not ipa_certprofile_kubeadm_exists.stdout == '1'
 
 - name: Ipa-kubernetes-ca | add kube service cluster IP to IPA server hosts for Dogtag reachability check
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "10.96.0.1 {{ orchestration_host_hostname }}"
+    line: "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)) }} {{ orchestration_host_hostname }}"
     state: present
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
 
 - name: Ipa-kubernetes-ca | add master node IP to IPA server hosts for Dogtag reachability check
@@ -178,7 +178,7 @@
     path: /etc/hosts
     line: "{{ orchestration_master_ip }} {{ orchestration_host_hostname }}"
     state: present
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
 
 # FreeIPA's ipacert request runs _validate_san_ips unconditionally (FreeIPA
@@ -198,7 +198,7 @@
     name:
       - "{{ ((kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1)).split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
     state: present
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -208,7 +208,7 @@
     name:
       - "{{ orchestration_master_ip.split('.')[:3] | reverse | join('.') ~ '.in-addr.arpa' }}"
     state: present
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -234,7 +234,7 @@
     record_type: A
     record_value:
       - "{{ orchestration_master_ip }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -256,7 +256,7 @@
     record_type: PTR
     record_value:
       - "kubernetes-svc.{{ company_domain }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -270,7 +270,7 @@
     record_value:
       - "{{ orchestration_host_hostname.split('.')[0] }}"
     state: absent
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -283,7 +283,7 @@
     record_type: PTR
     record_value:
       - "kubernetes-master.{{ company_domain }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
