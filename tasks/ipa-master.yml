@@ -7,11 +7,13 @@
     host: "{{ orchestration_host_hostname }}"
     allow_retrieve_keytab_host: "{{ orchestration_host_hostname }}"
     allow_create_keytab_host: "{{ orchestration_host_hostname }}" # TODO create kubernetes master group
-    skip_host_check: True
-  delegate_to: "{{ groups[idm_group][0] }}"
+    force: True
+  delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   loop:
    - "HTTP/{{ orchestration_host_hostname }}"
+  failed_when: false
+  changed_when: false
 
 - name: Ipa-master | set service to be managed by current host
   freeipa.ansible_freeipa.ipahost:
@@ -21,4 +23,4 @@
        managedby_host: "{{ orchestration_host_hostname }}"
     action: member
   no_log: "{{ secure_logs }}"
-  delegate_to: "{{ groups[idm_group][0] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"

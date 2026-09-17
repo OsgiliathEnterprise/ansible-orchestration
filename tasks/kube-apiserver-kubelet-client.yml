@@ -1,14 +1,19 @@
 ---
 
+- name: Kube-apiserver-kubelet-client | remove kubeadm kubelet-client cert so IPA-signed one is created
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
+    - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
+    - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
+  become: true
+
 - name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client certs
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
   become: true
-
-- name: Kube-apiserver-kubelet-client | Check that kube-apiserver-kubelet-client certs exists
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
-  register: apiserver_kubelet_client_result
 
 - name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client csr
   community.crypto.openssl_csr:
@@ -17,64 +22,22 @@
     country_name: "{{ kube_credential_country_name }}"
     organization_name: "system:masters"
     email_address: "{{ kube_credential_email_address }}"
-    common_name: "{{ orchestration_host_hostname }}" # "api.kubernetes.{{ company_domain }}"
+    common_name: "{{ orchestration_host_hostname }}"
     key_usage:
       - digitalSignature
       - keyEncipherment
     extended_key_usage:
       - clientAuth
-  when: not apiserver_kubelet_client_result.stat.exists
   become: true
 
-# - name: ansible-orchestration | ipa-api-server | configure http service
-#  freeipa.ansible_freeipa.ipaservice:
-#    ipaadmin_password: "{{ company_realm_password }}"
-#    name: "{{ item }}"
-#    host: "{{ orchestration_host_hostname }}"
-#    allow_create_keytab_group:
-#      - admins
-#    allow_retrieve_keytab_group:
-#      - admins
-#    allow_retrieve_keytab_host: "{{ orchestration_host_hostname }}"
-#    allow_create_keytab_host: "{{ orchestration_host_hostname }}" # TODO create kubernetes master group
-#    skip_host_check: True
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  no_log: "{{ secure_logs }}"
-#  loop:
-#   - "HTTP/api.kubernetes.{{ company_domain }}"
-
-# - name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
-#  freeipa.ansible_freeipa.ipagroup:
-#    ipaadmin_password: "{{ company_realm_password }}"
-#    name: "kubernetes-administrators"
-#    service: "HTTP/api.kubernetes.{{ company_domain }}"
-#  no_log: "{{ secure_logs }}"
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  when:
-#   - not ipa_group_kubeadm_exists.stdout == '1'
-
-# - name: ansible-orchestration | ipa-api-server | create dummy host for default SAN
-#  shell: >
-#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
-#    ipa add-host api.kubernetes.{{ company_domain }} &&
-#    ipa host-add-managedby api.kubernetes.{{ company_domain }} --hosts={{ orchestration_host_hostname }}
-#  failed_when: False
-#  changed_when: False
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  no_log: "{{ secure_logs }}"
-
-- name: Kube-apiserver-kubelet-client | Check kube-apiserver-kubelet-client existence
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
-  register: orchestration_apiserver_kubelet_client
-  become: true
-
-- name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client crt # TODO use dedicated kerb principal backup kinit -kt /etc/krb5.keytab host/{{ orchestration_host_hostname }} && kvno -S HTTP/api.kubernetes.{{ company_domain }} {{ hostname | default(kube_machine_hostname.stdout) }}
-  ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null &&
-    ipa cert-request --certificate-out {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt --principal host/{{ orchestration_host_hostname }} --ca=kubernetes-ca --profile-id=kubeAdministrators {{ kubernetes_certificates_path }}apiserver-kubelet-client.csr
-  when:
-   - not orchestration_apiserver_kubelet_client.stat.exists
+- name: Kube-apiserver-kubelet-client | request kubelet client certificate from IPA
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    principal: "host/{{ orchestration_host_hostname }}"
+    csr_file: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
+    certificate_out: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
+    profile_id: kubeAdministrators
+    state: requested
   no_log: "{{ secure_logs }}"
-  changed_when: False
   become: true

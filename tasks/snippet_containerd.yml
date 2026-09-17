@@ -4,7 +4,8 @@
   ansible.builtin.import_role:
     name: geerlingguy.containerd
   vars:
-    containerd_config_cgroup_driver_systemd: False # Geerlinguy containerd for systemd is buggy
+    containerd_config_cgroup_driver_systemd: True
+    containerd_config_default_write: True
     ansible_become: True
     docker_yum_gpg_key: "{{ docker_gpg_key }}"
-  # notify: ansible-orchestration | refresh containerd
+  notify: ansible-orchestration | refresh containerd

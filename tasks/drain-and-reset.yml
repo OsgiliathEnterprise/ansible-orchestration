@@ -1,45 +1,102 @@
 ---
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-ingress)
-  ansible.builtin.command: "helm delete istio-ingress -n istio-system"
-  become: Yes
-  register: _result
-  changed_when: "'uninstalled' in _result.stdout"
-  failed_when: false
+- name: Drain-and-reset | detect host architecture
+  ansible.builtin.command: uname -m
+  register: _arch_raw
+  changed_when: false
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-egress)
-  ansible.builtin.command: "helm delete istio-egress -n istio-system"
+- name: Drain-and-reset | check if helm CLI is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/helm
+  register: _helm_bin_stat
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
-  failed_when: false
 
-- name: Drain-and-reset | remove charts with disruption budget (istiod)
-  ansible.builtin.command: "helm delete istiod -n istio-system"
+- name: Drain-and-reset | download helm CLI tarball
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    dest: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    mode: "0644"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
-  failed_when: false
+  when: not _helm_bin_stat.stat.exists
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-base)
-  ansible.builtin.command: "helm delete istio-base -n istio-system"
+- name: Drain-and-reset | extract helm CLI binary
+  ansible.builtin.unarchive:
+    src: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+    include:
+      - "linux-{{ helm_arch }}/helm"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
   become: Yes
-  changed_when: "'uninstalled' in _result.stdout"
+  when: not _helm_bin_stat.stat.exists
+
+- name: Drain-and-reset | install helm CLI
+  ansible.builtin.copy:
+    src: "/tmp/linux-{{ helm_arch }}/helm"
+    dest: /usr/local/bin/helm
+    remote_src: true
+    mode: "0755"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
+  become: Yes
+  when: not _helm_bin_stat.stat.exists
+
+- name: Drain-and-reset | list all helm releases
+  ansible.builtin.command: >-
+    helm list -A --all -o json --kubeconfig {{ kube_config_path }}
+  become: Yes
+  changed_when: false
   failed_when: false
+  register: _helm_releases
+
+- name: Drain-and-reset | uninstall all helm releases
+  kubernetes.core.helm:
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
+    release_state: absent
+    wait: false
+    kubeconfig: "{{ kube_config_path }}"
+  become: Yes
+  failed_when: false
+  loop: "{{ ((s | from_json) if (s is match('^\\s*\\[')) else []) | selectattr('status', 'in', ['deployed', 'failed']) | list }}"
+  vars:
+    s: "{{ _helm_releases.stdout | default('[]') }}"
 
 - name: Drain-and-reset | drain nodes
-  ansible.builtin.command: "kubectl drain {{ hostvars[registeredhost].hostname | default(registeredhost) }} --delete-emptydir-data --force --timeout=800s --ignore-daemonsets=true"
+  kubernetes.core.k8s_drain:
+    name: "{{ hostvars[registeredhost].hostname | default(registeredhost) }}"
+    state: drain
+    force: true
+    ignore_daemonsets: true
+    delete_emptydir_data: true
+    terminate_grace_period: 800
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
   failed_when: false
-  register: res
-  changed_when: res.stdout == "node/" + hostvars[registeredhost].hostname | default(registeredhost) + "drained"
   loop: "{{ groups[kube_nodes_group] | default([]) | list }}"
   loop_control:
     loop_var: registeredhost
 
-- name: Drain-and-reset | delete nodes at master level
-  ansible.builtin.command: "kubectl delete node --all"
-  register: res
-  changed_when: "'deleted' in res.stdout"
+- name: Drain-and-reset | list all nodes for deletion
+  kubernetes.core.k8s_info:
+    kind: Node
+    kubeconfig: "{{ kube_config_path }}"
   become: Yes
+  register: _k8s_nodes
+  failed_when: false
+
+- name: Drain-and-reset | delete nodes at master level
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Node
+    name: "{{ item.metadata.name }}"
+    state: absent
+    kubeconfig: "{{ kube_config_path }}"
+  become: Yes
+  loop: "{{ _k8s_nodes.resources | default([]) }}"
   failed_when: false
 
 - name: Drain-and-reset | reset kubeadm

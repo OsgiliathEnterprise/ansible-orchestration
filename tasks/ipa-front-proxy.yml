@@ -1,0 +1,43 @@
+---
+
+- name: Ipa-front-proxy | remove kubeadm front-proxy cert so IPA-signed one is created
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kubernetes_certificates_path }}front-proxy-client.crt"
+    - "{{ kubernetes_certificates_path }}front-proxy-client.key"
+    - "{{ kubernetes_certificates_path }}front-proxy-client.csr"
+  become: true
+
+- name: Ipa-front-proxy | create front-proxy-client private key
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_certificates_path }}front-proxy-client.key"
+  become: true
+
+- name: Ipa-front-proxy | create front-proxy-client csr
+  community.crypto.openssl_csr:
+    path: "{{ kubernetes_certificates_path }}front-proxy-client.csr"
+    privatekey_path: "{{ kubernetes_certificates_path }}front-proxy-client.key"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "{{ company_domain }}"
+    email_address: "{{ kube_credential_email_address }}"
+    common_name: "{{ orchestration_host_hostname }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - clientAuth
+  become: true
+
+- name: Ipa-front-proxy | request front-proxy certificate from IPA
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    principal: "host/{{ orchestration_host_hostname }}"
+    csr_file: "{{ kubernetes_certificates_path }}front-proxy-client.csr"
+    certificate_out: "{{ kubernetes_certificates_path }}front-proxy-client.crt"
+    profile_id: kubeAdministrators
+    state: requested
+  no_log: "{{ secure_logs }}"
+  become: true

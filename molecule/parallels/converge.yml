@@ -5,12 +5,21 @@
     secure_logs: False
     standalone_role: False
     company_domain: osgiliath.test
+    company_realm_password: '123ADMin'
     preferred_nic: "enp0s5"
     idm_preferred_nic: "enp0s5"
     master_preferred_nic: "enp0s5"
     reset_kube: True
   #        kube_alt_names:
 #          - "kubeadm.osgiliath.net"
+    nfs_mountpoints:
+      - host: idm.osgiliath.test
+        mountpoints:
+          - local: /net
+            remote: /var/nfs/volume
+            kubernetes_volumes:
+              - subtree: /artefactrepo
+                mountsize: 1
   roles:
     - role: tcharl.ansible_orchestration
 
@@ -24,16 +33,6 @@
     preferred_nic: "enp0s5"
     master_preferred_nic: "enp0s5"
     idm_preferred_nic: "enp0s5"
-    nfs_mountpoints:
-      - host: idm.osgiliath.test
-        mountpoints:
-          - remote: /var/shared/csi
-            local: /net
-            csi_mount: Yes
-          - local: /net
-            remote: /var/shared/volume
-            kubernetes_volumes:
-              - subtree: /artefactrepo
-                mountsize: 1
+    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
   roles:
     - role: tcharl.ansible_orchestration

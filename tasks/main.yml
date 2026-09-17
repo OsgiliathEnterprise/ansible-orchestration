@@ -26,29 +26,50 @@
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
 
-# - name: ansible-orchestration | delegate kubernetes ca creation to IPA
-#  include_tasks: ipa-certs.yml
-#  when:
-#   - kube_masters_group in group_names
-
-- name: Install kube on node # Executed sequentially: control plane should be executed first
+- name: Install kube on master (kubeadm init)
   ansible.builtin.include_tasks: kube-install.yml
-#  when:
-#    - kube_nodes_group in group_names
+  when:
+    - kube_masters_group in group_names
+
+- name: Setup IPA PKI certificates on master
+  ansible.builtin.include_tasks: ipa-certs.yml
+  when:
+    - kube_masters_group in group_names
+
+- name: Install kube on nodes (packages + kubelet, join deferred to file-based discovery)
+  when:
+    - kube_nodes_group in group_names
+  block:
+    - name: Install kube on nodes
+      ansible.builtin.include_tasks: kube-install.yml
+  rescue:
+    - name: Node join failed (expected on first converge), will retry with file-based discovery
+      ansible.builtin.debug:
+        msg: "Node join failed during kube-install. Packages installed. Will join via kube-install-join-node.yml after master post-processing."
+
+- name: Join nodes before API server cert swap (JWS signature still valid)
+  ansible.builtin.include_tasks: kube-install-join-node.yml
+  when:
+    - kube_nodes_group in group_names
+
+- name: Patch kube configs to use IPA CA
+  ansible.builtin.include_tasks: ipa-pki-swap.yml
+  when:
+    - kube_masters_group in group_names
 
 - name: Firewalld configuration for kube
   ansible.builtin.include_tasks: kube-firewall.yml
   when:
     - kube_masters_group in group_names or kube_nodes_group in group_names
 
-- name: Create local volumes for nfs mount on nodes
+- name: Create admin user
+  ansible.builtin.import_tasks: admin-user.yml
+  when:
+    - kube_masters_group in group_names
+
+- name: Create NFS-type persistent volumes on master
   ansible.builtin.include_tasks: nfs-mountpoints.yml
   when:
     - nfs_mountpoints is defined
     - nfs_mountpoints | length > 0
-    - kube_nodes_group in group_names
-
-- name: Create admin user
-  ansible.builtin.import_tasks: admin-user.yml
-  when:
     - kube_masters_group in group_names

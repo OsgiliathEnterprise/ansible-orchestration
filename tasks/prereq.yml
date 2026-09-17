@@ -11,6 +11,7 @@
      - wget
      - bird
      - libcap
+     - crictl
     state: present
   become: true
 

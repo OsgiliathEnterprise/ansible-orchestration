@@ -1,0 +1,22 @@
+---
+
+- name: Ipa-node-sync | slurp CA from master
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/pki/ca.crt
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: ca_content
+  become: true
+
+- name: Ipa-node-sync | create pki directory on node
+  ansible.builtin.file:
+    path: /etc/kubernetes/pki
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Ipa-node-sync | write CA to node
+  ansible.builtin.copy:
+    content: "{{ ca_content.content | b64decode }}"
+    dest: /etc/kubernetes/pki/ca.crt
+    mode: '0644'
+  become: true
