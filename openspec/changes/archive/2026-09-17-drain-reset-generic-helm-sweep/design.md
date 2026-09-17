@@ -31,9 +31,9 @@ See proposal.md for motivation. Current state of `tasks/drain-and-reset.yml` (ru
 
 Chosen over adding an install task to `tcharl.kubernetes`: the destroy path is the only consumer, so the binary is fetched only when destroying, and no converge gains a dependency.
 
-- `get_url` the static binary tarball from `https://get.helm.sh/helm-v{{ helm_version }}-linux-{{ helm_arch }}.tar.gz` and unpack to `/usr/local/bin/helm` (`unarchive`, `remote_src`), `become: true`.
+- `get_url` the static binary tarball from `https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz` to `/tmp`, then `unarchive` (`remote_src`) with `include: ["linux-{{ helm_arch }}/helm"]` to `/tmp`, then `copy` the binary to `/usr/local/bin/helm` (`remote_src`, `mode: 0755`), all `become: true`. The modern helm tarball nests the binary under a `linux-<arch>/` top-level dir (verified: `linux-arm64/helm`), so a direct `unarchive` to `/usr/local/bin` would land the binary one level too deep; the extract-then-copy sequence places it exactly at `/usr/local/bin/helm`.
 - `helm_version` pinned in `defaults/main.yml` (one-line bump to upgrade).
-- `helm_arch` derived from `ansible_arch` (`x86_64`/`amd64` → `amd64`, `aarch64`/`arm64` → `arm64`) as a task-local var — covers Parallels and KVM guests on both host architectures.
+- `helm_arch` derived from `uname -m` output (`x86_64` → `amd64`, `aarch64` → `arm64`) as a task-local var — covers Parallels and KVM guests on both host architectures. Detected with a `command: uname -m` task (registered, `changed_when: false`) **rather than** the `ansible_arch` fact: the destroy path runs before `facts.yml` gathers facts, and the tox fact cache does not reliably populate `ansible_arch` at this point (verified: both the play-level `Gathering Facts` and an explicit `setup` with `filter: ansible_arch` return no `ansible_arch`, so the template errors with `ansible_arch is undefined`). `uname -m` bypasses fact caching entirely.
 - Skipped when `/usr/local/bin/helm` already exists (`stat`-based `when:`) → idempotent, and a pre-seeded binary (offline hosts) is honored without download.
 - **Fails loudly**: no `failed_when: false` on the install task — a missing CLI must not silently disable the sweep (the exact disease this change removes).
 
@@ -91,6 +91,7 @@ The three new tasks (install → list → uninstall loop) replace the four istio
 
 - [get.helm.sh unreachable at destroy time (offline host) → install fails → destroy path aborts] → mitigated by the `stat`-based skip: pre-seeding `/usr/local/bin/helm` (e.g. in prepare) bypasses the download. Per the spec, a genuinely broken download is fatal by design — silent no-op is the disease we are removing.
 - [Pinned helm version drifts from release tooling] → single `helm_version` variable; bump is one line.
+- [Arch detection via `uname -m` returns an unexpected value on an exotic guest] → the `replace()` chain maps only the two known values (`x86_64`, `aarch64`); any other value yields an unresolvable tarball URL and the install fails loudly (no silent no-op). Acceptable: the scenario targets amd64/arm64 guests only.
 - [Release created between list and loop] → destroy path; `kubeadm reset` is the final backstop.
 - [Uninstalling a release whose resources are owned by static-pod-like objects] → `wait: false`; residual objects are wiped with the node.
 - [Behavior change vs. old tasks] → none observable: the old tasks always failed (no CLI) or no-op'd (no releases).

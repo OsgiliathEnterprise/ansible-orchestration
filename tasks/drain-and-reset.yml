@@ -1,40 +1,69 @@
 ---
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-ingress)
-  kubernetes.core.helm:
-    name: istio-ingress
-    namespace: istio-system
-    release_state: absent
-    kubeconfig: "{{ kube_config_path }}"
-  become: Yes
-  failed_when: false
+- name: Drain-and-reset | detect host architecture
+  ansible.builtin.command: uname -m
+  register: _arch_raw
+  changed_when: false
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-egress)
-  kubernetes.core.helm:
-    name: istio-egress
-    namespace: istio-system
-    release_state: absent
-    kubeconfig: "{{ kube_config_path }}"
+- name: Drain-and-reset | check if helm CLI is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/helm
+  register: _helm_bin_stat
   become: Yes
-  failed_when: false
 
-- name: Drain-and-reset | remove charts with disruption budget (istiod)
-  kubernetes.core.helm:
-    name: istiod
-    namespace: istio-system
-    release_state: absent
-    kubeconfig: "{{ kube_config_path }}"
+- name: Drain-and-reset | download helm CLI tarball
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    dest: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    mode: "0644"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
   become: Yes
-  failed_when: false
+  when: not _helm_bin_stat.stat.exists
 
-- name: Drain-and-reset | remove charts with disruption budget (istio-base)
+- name: Drain-and-reset | extract helm CLI binary
+  ansible.builtin.unarchive:
+    src: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+    include:
+      - "linux-{{ helm_arch }}/helm"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
+  become: Yes
+  when: not _helm_bin_stat.stat.exists
+
+- name: Drain-and-reset | install helm CLI
+  ansible.builtin.copy:
+    src: "/tmp/linux-{{ helm_arch }}/helm"
+    dest: /usr/local/bin/helm
+    remote_src: true
+    mode: "0755"
+  vars:
+    helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
+  become: Yes
+  when: not _helm_bin_stat.stat.exists
+
+- name: Drain-and-reset | list all helm releases
+  ansible.builtin.command: >-
+    helm list -A --all -o json --kubeconfig {{ kube_config_path }}
+  become: Yes
+  changed_when: false
+  failed_when: false
+  register: _helm_releases
+
+- name: Drain-and-reset | uninstall all helm releases
   kubernetes.core.helm:
-    name: istio-base
-    namespace: istio-system
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
     release_state: absent
+    wait: false
     kubeconfig: "{{ kube_config_path }}"
   become: Yes
   failed_when: false
+  loop: "{{ ((s | from_json) if (s is match('^\\s*\\[')) else []) | selectattr('status', 'in', ['deployed', 'failed']) | list }}"
+  vars:
+    s: "{{ _helm_releases.stdout | default('[]') }}"
 
 - name: Drain-and-reset | drain nodes
   kubernetes.core.k8s_drain:

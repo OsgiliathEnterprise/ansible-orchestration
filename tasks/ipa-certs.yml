@@ -157,6 +157,7 @@
 - name: Ipa-certs | restart API server to pick up new IPA-signed certificate
   ansible.builtin.file:
     path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    mode: '0600'
     state: touch
   become: true
 
