@@ -31,9 +31,9 @@
     secure_logs: False
     skip_hostname_assert: True # Nic name is randomized at startup
     skip_nameserver_assert: True
-    preferred_nic: "ens5"
-    master_preferred_nic: "ens5"
-    idm_preferred_nic: "ens5"
+    preferred_nic: "ens7"
+    master_preferred_nic: "ens7"
+    idm_preferred_nic: "ens7"
     reset_kube: True
     standalone_role: False
     company_domain: osgiliath.test
