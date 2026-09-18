@@ -78,7 +78,7 @@
             create: true
             lvmetanames:
               - lvname: nfs_exposed
-                size: 4G
+                size: 3G
                 create: true
                 filesystem: xfs
                 expose_nfs: True

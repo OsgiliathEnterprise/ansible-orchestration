@@ -23,7 +23,7 @@ platforms:
         network_name: private_network
         type: dhcp
     provider_raw_config_args:
-      - "storage :file, :size => '3G', :device => 'vdb'"
+      - "storage :file, :size => '5G', :device => 'vdb'"
 #        ip: "192.168.50.6"
     groups:
       - ipaservers
