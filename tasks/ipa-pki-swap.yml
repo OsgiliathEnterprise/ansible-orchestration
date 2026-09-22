@@ -120,3 +120,8 @@
   retries: 6
   delay: 10
   until: "'Kubernetes control plane' in kubectl_verify.stdout"
+
+# Data-plane recovery must run last: after the kubelet refresh (above) so a recreated pod
+# mounts the post-swap CA, and after cluster stabilization. No-op when Calico is absent.
+- name: Ipa-pki-swap | recover Calico/Tigera data-plane workloads after CA swap
+  ansible.builtin.include_tasks: calico-ca-recovery.yml

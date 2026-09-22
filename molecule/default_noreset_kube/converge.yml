@@ -1,6 +1,9 @@
 ---
-- name: Converge master
-  hosts: master.osgiliath.test
+# Single order-tolerant play: master + node run the role together in one pass instead of
+# two sequential plays. Cross-host dependencies are handled by readiness gates inside the
+# role (API-server /healthz + FreeIPA CA/profile availability), not by play ordering.
+- name: Converge cluster
+  hosts: master.osgiliath.test,node1.osgiliath.test
   vars:
     secure_logs: False
     preferred_nic: "eth1"
@@ -10,8 +13,7 @@
     reset_kube: False
     standalone_role: False
     company_domain: osgiliath.test
-  #        kube_alt_names:
-#          - "kubeadm.osgiliath.net"
+    company_realm_password: '123ADMin'
     nfs_mountpoints:
       - host: idm.osgiliath.test
         mountpoints:
@@ -23,19 +25,6 @@
             kubernetes_volumes:
               - subtree: /artefactrepo
                 mountsize: 1
-  roles:
-    - role: tcharl.ansible_orchestration
-
-- name: Converge node
-  hosts: node1.osgiliath.test
-  vars:
-    secure_logs: False
-    preferred_nic: "eth1"
-    master_preferred_nic: "eth1"
-    idm_preferred_nic: "eth1"
-    reset_kube: False
-    standalone_role: False
-    company_domain: osgiliath.test
   roles:
     - role: tcharl.ansible_orchestration
 

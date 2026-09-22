@@ -170,6 +170,25 @@ def test_kubectl_get_nodes_with_ipa_credentials(host):
     assert int(cmd.stdout) >= 1
 
 
+def test_node_ready_via_master_admin_conf(host):
+    """V2 end-state: master's admin.conf (post pki-swap, trusting the IPA CA) sees the
+    worker node as Ready. Proves admin.conf is patched + API up + node registered —
+    the exact path the converge-time verification relies on."""
+    import time
+    command = r"""
+    kubectl get node node1.osgiliath.test --kubeconfig /etc/kubernetes/admin.conf \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'"""
+    with host.sudo():
+        ready = ''
+        for _ in range(24):
+            cmd = host.run(command)
+            ready = cmd.stdout
+            if 'True' in ready:
+                break
+            time.sleep(15)
+        assert 'True' in ready, f"node not Ready via master admin.conf (got {ready!r})"
+
+
 # IPA PKI bootstrap tests
 
 def test_ca_crt_exists_at_pki_path(host):

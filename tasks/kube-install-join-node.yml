@@ -1,6 +1,9 @@
 ---
-# Join the node by directly copying admin.conf as kubelet.conf,
-# bypassing bootstrap entirely since the cert swap breaks JWS signature publishing.
+# Join the node with its own per-node IPA identity. The trust anchor (ca.crt) and the
+# client certificate come from FreeIPA — not copied off the master — so this no longer
+# depends on master post-processing state. It only waits for two readiness signals:
+#   1. the API server is reachable (/healthz == 200), and
+#   2. the kubernetes-ca + kubernetesNodes profile exist in FreeIPA (design D2/D3).
 
 - name: Kube-install-join | check if node already joined
   ansible.builtin.stat:
@@ -11,6 +14,18 @@
 - name: Kube-install-join | join node (skip if already joined)
   when: not kube_node_joined.stat.exists
   block:
+    # --- Gate: API server must be reachable before we join (design D3) ---
+    - name: Kube-install-join | wait for API server readiness
+      ansible.builtin.uri:
+        url: "https://{{ orchestration_master_ip }}:6443/healthz"
+        validate_certs: no
+        status_code: 200
+      become: true
+      retries: 40
+      delay: 5
+      register: api_server_ready
+      until: api_server_ready.status == 200
+
     - name: Kube-install-join | remove kubeadm drop-in so kubelet won't try bootstrap on restart
       ansible.builtin.file:
         path: /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
@@ -86,11 +101,35 @@
         mode: '0755'
       become: true
 
-    - name: Kube-install-join | copy CA cert from master
-      ansible.builtin.slurp:
-        src: /etc/kubernetes/pki/ca.crt
+    # --- Gate: the CA + per-node profile must exist in FreeIPA before we request (design D3) ---
+    - name: Kube-install-join | wait for kubernetesNodes profile to exist in FreeIPA
+      ansible.builtin.shell: |
+        set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+        ipa certprofile-find | grep -c ': kubernetesNodes'
+      delegate_to: "{{ groups[idm_group] | first }}"
       become: true
-      delegate_to: "{{ groups[kube_masters_group] | first }}"
+      changed_when: false
+      no_log: "{{ secure_logs }}"
+      retries: 20
+      delay: 5
+      register: node_profile_check
+      until: node_profile_check.stdout == '1'
+
+    # --- Trust anchor from FreeIPA (task 3.1): fetch CA from the IDM host, not master ---
+    - name: Kube-install-join | fetch CA cert from FreeIPA (delegated to idm)
+      ansible.builtin.shell: |
+        set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+        ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      changed_when: false
+      no_log: "{{ secure_logs }}"
+
+    - name: Kube-install-join | slurp CA cert from idm
+      ansible.builtin.slurp:
+        src: /tmp/kube-node-ca.crt
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
       register: kube_ca_crt
 
     - name: Kube-install-join | install CA cert on node
@@ -100,51 +139,32 @@
         mode: '0644'
       become: true
 
-    - name: Kube-install-join | create kubecreds directory on node
-      ansible.builtin.file:
-        path: /home/kubecreds
-        state: directory
-        mode: '0755'
-      become: true
+    # --- Per-node client certificate (task 2.1): this node's own identity ---
+    - name: Kube-install-join | request this node's own client cert from FreeIPA
+      ansible.builtin.include_tasks: kube-node-cert.yml
 
-    - name: Kube-install-join | copy admin client cert from master
-      ansible.builtin.slurp:
-        src: /home/kubecreds/kubeadm.crt
-      become: true
-      delegate_to: "{{ groups[kube_masters_group] | first }}"
-      register: kube_admin_crt
-
-    - name: Kube-install-join | install admin client cert on node
+    # --- Construct per-node kubelet.conf (task 4.1): own cert/key + IPA CA + API URL ---
+    - name: Kube-install-join | create per-node kubelet.conf
       ansible.builtin.copy:
-        content: "{{ kube_admin_crt.content | b64decode }}"
-        dest: /home/kubecreds/kubeadm.crt
-        mode: '0644'
-      become: true
-
-    - name: Kube-install-join | copy admin client key from master
-      ansible.builtin.slurp:
-        src: /home/kubecreds/kubeadm.pem
-      become: true
-      delegate_to: "{{ groups[kube_masters_group] | first }}"
-      register: kube_admin_pem
-
-    - name: Kube-install-join | install admin client key on node
-      ansible.builtin.copy:
-        content: "{{ kube_admin_pem.content | b64decode }}"
-        dest: /home/kubecreds/kubeadm.pem
-        mode: '0600'
-      become: true
-
-    - name: Kube-install-join | copy admin.conf from master as kubelet.conf
-      ansible.builtin.slurp:
-        src: /etc/kubernetes/admin.conf
-      become: true
-      delegate_to: "{{ groups[kube_masters_group] | first }}"
-      register: kube_admin_conf
-
-    - name: Kube-install-join | create kubelet.conf on node
-      ansible.builtin.copy:
-        content: "{{ kube_admin_conf.content | b64decode }}"
+        content: |
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - cluster:
+              certificate-authority: /etc/kubernetes/pki/ca.crt
+              server: https://{{ orchestration_master_ip }}:6443
+            name: default-cluster
+          contexts:
+          - context:
+              cluster: default-cluster
+              user: default-user
+            name: default-context
+          current-context: default-context
+          users:
+          - name: default-user
+            user:
+              client-certificate: /etc/kubernetes/pki/node-client.crt
+              client-key: /etc/kubernetes/pki/node-client.key
         dest: /etc/kubernetes/kubelet.conf
         mode: '0640'
       become: true
@@ -156,7 +176,7 @@
           kind: KubeletConfiguration
           cgroupDriver: systemd
           clusterDNS:
-            - 10.96.0.10
+            - {{ orchestration_kube_dns_ip }}
           clusterDomain: cluster.local
         dest: /var/lib/kubelet/config.yaml
         mode: '0644'
@@ -172,9 +192,8 @@
 
     - name: Kube-install-join | wait for node to appear in cluster
       ansible.builtin.shell: |
-        kubectl get node {{ inventory_hostname }} --kubeconfig /etc/kubernetes/admin.conf
+        kubectl get node {{ inventory_hostname }} --kubeconfig /etc/kubernetes/kubelet.conf
       become: true
-      delegate_to: "{{ groups[kube_masters_group] | first }}"
       retries: 40
       delay: 5
       register: node_check

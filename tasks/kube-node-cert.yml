@@ -1,0 +1,94 @@
+---
+# Request this worker node's own client certificate from the kubernetes-ca.
+# The CSR carries CN=<hostname> (matching the host principal so IPA's host-principal
+# hostname check passes); the kubernetesNodes profile template adds the system:node:
+# prefix, so the ISSUED cert is O=system:nodes, CN=system:node:<hostname> and the
+# kubelet registers with node-scoped RBAC instead of a shared admin identity (D1/D5).
+# Key/CSR/cert are generated on the control plane (which has community.crypto +
+# freeipa tooling) and copied back to the node, where the private key is provisioned.
+
+- name: Kube-node-cert | check if node client cert exists locally
+  ansible.builtin.stat:
+    path: "{{ kubernetes_certificates_path }}node-client.crt"
+  register: node_client_cert_result
+  become: true
+
+- name: Kube-node-cert | create node client private key (on control plane)
+  community.crypto.openssl_privatekey:
+    path: "/tmp/node-{{ orchestration_host_hostname }}.key"
+    mode: '0600'
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | create node client csr (on control plane)
+  community.crypto.openssl_csr:
+    path: "/tmp/node-{{ orchestration_host_hostname }}.csr"
+    privatekey_path: "/tmp/node-{{ orchestration_host_hostname }}.key"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "system:nodes"
+    email_address: "{{ kube_credential_email_address }}"
+    # CSR carries the bare hostname (matches host/<hostname> principal); the profile
+    # template adds the system:node: prefix so the issued CN is system:node:<hostname>.
+    common_name: "{{ orchestration_host_hostname }}"
+    key_usage: [digitalSignature, keyEncipherment]
+    extended_key_usage: [clientAuth]
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | request node client certificate from IPA (on control plane)
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: kubernetes-ca
+    principal: "host/{{ orchestration_host_hostname }}"
+    csr_file: "/tmp/node-{{ orchestration_host_hostname }}.csr"
+    certificate_out: "/tmp/node-{{ orchestration_host_hostname }}.crt"
+    profile_id: kubernetesNodes
+    state: requested
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | slurp node client cert from control plane
+  ansible.builtin.slurp:
+    src: "/tmp/node-{{ orchestration_host_hostname }}.crt"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  register: node_client_crt
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | slurp node client key from control plane
+  ansible.builtin.slurp:
+    src: "/tmp/node-{{ orchestration_host_hostname }}.key"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  register: node_client_key
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | install node client cert on node
+  ansible.builtin.copy:
+    content: "{{ node_client_crt.content | b64decode }}"
+    dest: "{{ kubernetes_certificates_path }}node-client.crt"
+    mode: '0644'
+  become: true
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | install node client key on node
+  ansible.builtin.copy:
+    content: "{{ node_client_key.content | b64decode }}"
+    dest: "{{ kubernetes_certificates_path }}node-client.key"
+    mode: '0600'
+  become: true
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | clean up temp files on control plane
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  loop:
+    - "/tmp/node-{{ orchestration_host_hostname }}.key"
+    - "/tmp/node-{{ orchestration_host_hostname }}.csr"
