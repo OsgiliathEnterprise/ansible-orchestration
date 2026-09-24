@@ -54,6 +54,20 @@ platforms:
     groups:
       - ipaclients
       - kube_node
+  - name: node2.osgiliath.test
+    box: ${TESTBOX:-fedora-cloud-44-virtualbox}
+    box_url: ${TESTBOX_URL:-https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Vagrant-VirtualBox-44-1.7.x86_64.vagrant.virtualbox.box}
+    provider_options:
+      cpus: 2
+      memory: 2048
+    interfaces:
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
+        virtualbox__intnet: "internalnetwork"
+    groups:
+      - ipaclients
+      - kube_node
 provisioner:
   name: ansible
   env:

@@ -1,9 +1,10 @@
 ---
-# Single order-tolerant play: master + node run the role together in one pass instead of
-# two sequential plays. Cross-host dependencies are handled by readiness gates inside the
-# role (API-server /healthz + FreeIPA CA/profile availability), not by play ordering.
+# Single order-tolerant play: master + all worker nodes run the role together in one pass
+# instead of two sequential plays. Cross-host dependencies are handled by readiness gates
+# inside the role (API-server /healthz + FreeIPA CA/profile availability), not by play
+# ordering. Targeting group unions means adding a worker is a molecule.yml-only change.
 - name: Converge cluster
-  hosts: master.osgiliath.test,node1.osgiliath.test
+  hosts: kube_master,kube_node
   vars:
     standalone_role: False
     secure_logs: False

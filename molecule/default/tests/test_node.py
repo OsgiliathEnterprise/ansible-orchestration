@@ -1,5 +1,20 @@
 """Role testing files using testinfra."""
-testinfra_hosts = ["node1.osgiliath.test"]
+import os
+
+
+def _worker_hosts():
+    """Derive the hosts to test from molecule's inventory: every kube_node member, so
+    adding a worker platform is a molecule.yml-only change (no test edits needed)."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return []  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    return sorted(
+        ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"]).get_hosts("kube_node")
+    )
+
+
+testinfra_hosts = _worker_hosts()
 
 
 def test_kubelet_active(host):

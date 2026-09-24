@@ -1,8 +1,20 @@
 """Role testing files using testinfra."""
 import base64
+import os
 import re
 
 testinfra_hosts = ["master.osgiliath.test"]
+
+
+def _worker_hosts():
+    """Derive the worker hosts from molecule's inventory (all kube_node members)."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return []  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    return sorted(
+        ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"]).get_hosts("kube_node")
+    )
 
 
 def test_kubernetes_ca_exists(host):
@@ -95,13 +107,20 @@ def test_tigera_operator_pods_running(host):
         assert int(cmd.stdout) > 0
 
 
-def test_kubectl_get_nodes_equals_two(host):
-    command = r"""
-    kubectl get nodes --no-headers | \
-    wc -l"""
+def test_kubectl_get_nodes_matches_inventory(host):
+    """The cluster contains exactly master plus every worker from molecule's inventory —
+    so adding a platform is a molecule.yml-only change."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    runner = ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"])
+    expected = sorted(runner.get_hosts("kube_master") + runner.get_hosts("kube_node"))
+    command = "kubectl get nodes --no-headers | awk '{print $1}'"
     with host.sudo():
         cmd = host.run(command)
-        assert int(cmd.stdout) == 2
+        actual = sorted(line for line in cmd.stdout.splitlines() if line.strip())
+        assert actual == expected, f"cluster nodes {actual} != inventory hosts {expected}"
 
 
 def test_admin_cert_issuer_is_kubernetes_ca(host):
@@ -174,22 +193,30 @@ def test_kubectl_get_nodes_with_ipa_credentials(host):
 
 
 def test_node_ready_via_master_admin_conf(host):
-    """V2 end-state: master's admin.conf (post pki-swap, trusting the IPA CA) sees the
-    worker node as Ready. Proves admin.conf is patched + API up + node registered —
+    """V2 end-state: master's admin.conf (post pki-swap, trusting the IPA CA) sees every
+    worker node as Ready. Proves admin.conf is patched + API up + all nodes registered —
     the exact path the converge-time verification relies on."""
     import time
-    command = r"""
-    kubectl get node node1.osgiliath.test --kubeconfig /etc/kubernetes/admin.conf \
-    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'"""
+
+    workers = _worker_hosts()
+    assert workers, "no kube_node hosts found in molecule inventory"
+    command_tmpl = (
+        "kubectl get node {worker} --kubeconfig /etc/kubernetes/admin.conf "
+        "-o jsonpath='{{.status.conditions[?(@.type==\"Ready\")].status}}'"
+    )
     with host.sudo():
-        ready = ''
+        statuses = {}
         for _ in range(24):
-            cmd = host.run(command)
-            ready = cmd.stdout
-            if 'True' in ready:
+            statuses = {
+                worker: 'True' in host.run(command_tmpl.format(worker=worker)).stdout
+                for worker in workers
+            }
+            if all(statuses.values()):
                 break
             time.sleep(15)
-        assert 'True' in ready, f"node not Ready via master admin.conf (got {ready!r})"
+        assert all(statuses.values()), (
+            f"not all worker nodes Ready via master admin.conf (got {statuses!r})"
+        )
 
 
 # IPA PKI bootstrap tests

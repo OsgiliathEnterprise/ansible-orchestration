@@ -17,9 +17,7 @@
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: Prepare secure the hosts
-  hosts:
-    - master.osgiliath.test
-    - node1.osgiliath.test
+  hosts: kube_master,kube_node
   tasks:
     - name: "install fedora ansible prerequisites"
       ansible.builtin.raw: dnf install -y python3 python3-libdnf5
@@ -81,8 +79,7 @@
         configure_nfs: True
 
 - name: Prepare NFS client on Node
-  hosts:
-    - node1.osgiliath.test
+  hosts: kube_node
   tasks:
     - include_role:
         name: tcharl.nfs_client
@@ -95,17 +92,13 @@
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: configure containerization prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes
-  hosts: # use this order: master should be created before node
-    - master.osgiliath.test
-    - node1.osgiliath.test
+  hosts: kube_master,kube_node # use this order: master should be created before node
   roles:
     - role: geerlingguy.containerd
   become: Yes
 
 - name: configure kubernetes prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes
-  hosts:
-    - master.osgiliath.test
-    - node1.osgiliath.test
+  hosts: kube_master,kube_node
   vars:
     swap_file_state: absent
   roles:
