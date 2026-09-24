@@ -1,4 +1,7 @@
 """Role testing files using testinfra."""
+import base64
+import re
+
 testinfra_hosts = ["master.osgiliath.test"]
 
 
@@ -265,10 +268,17 @@ def test_controller_manager_conf_references_ipa_ca(host):
     assert "certificate-authority: /etc/kubernetes/pki/ca.crt" in cfg.content.decode()
 
 
-def test_scheduler_conf_references_ipa_ca(host):
+def test_scheduler_conf_embeds_ipa_ca(host):
+    # The scheduler's static pod does not mount /etc/kubernetes/pki, so a file reference to
+    # ca.crt would crash it at boot ("unable to read certificate-authority"); its kubeconfig
+    # must carry the IPA CA embedded instead.
     cfg = host.file("/etc/kubernetes/scheduler.conf")
     assert cfg.exists
-    assert "certificate-authority: /etc/kubernetes/pki/ca.crt" in cfg.content.decode()
+    match = re.search(r"certificate-authority-data:\s*(\S+)", cfg.content.decode())
+    assert match, "scheduler.conf must embed certificate-authority-data (static pod lacks pki mount)"
+    embedded = base64.b64decode(match.group(1)).decode().strip()
+    ca_crt = host.file("/etc/kubernetes/pki/ca.crt").content.decode().strip()
+    assert embedded == ca_crt, "embedded CA must match /etc/kubernetes/pki/ca.crt (IPA CA)"
 
 
 def test_kubeadm_init_succeeded_clean_pki(host):

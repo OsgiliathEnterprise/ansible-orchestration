@@ -19,8 +19,9 @@
 
 - name: Calico-ca-recovery | rolling restart calico-node to re-materialise post-swap CA
   # Rolling (not mass-delete) so each node's CNI stays up while its pod is replaced one at a time.
-  ansible.builtin.shell: kubectl --kubeconfig /etc/kubernetes/admin.conf -n calico-system rollout restart daemonset/calico-node
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf -n calico-system rollout restart daemonset/calico-node
   become: true
+  changed_when: true
   when: calico_node_ds.stdout | default('') | length > 0
 
 - name: Calico-ca-recovery | wait for a Ready calico-node on every node
@@ -29,6 +30,7 @@
   # trailing READINESS GATES column, so the NODE column index shifts across kubectl versions; the
   # node FQDN appears exactly once per pod line and cannot collide with an IP or `<none>`.
   ansible.builtin.shell: |
+    set -o pipefail
     kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r node; do
       [ -z "$node" ] && continue
       ready=$(kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n calico-system -o wide --no-headers 2>/dev/null | awk -v n="$node" '$1 ~ /^calico-node-/ {for(i=3;i<=NF;i++) if($i==n){split($2,r,"/"); if (r[1]>0 && r[1]==r[2]) c++}} END{print c+0}')

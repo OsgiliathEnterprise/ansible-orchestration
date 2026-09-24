@@ -69,6 +69,35 @@
     mode: '0644'
   become: true
 
+# Must run before the manifest edits below: those change mtime and make kubelet restart the
+# KCM/scheduler static pods, which then boot with whatever their kubeconfigs point at. If the
+# confs still carry the embedded kubeadm CA (certificate-authority-data), the restarted
+# controllers can never verify the IPA-signed API cert and stay broken for the rest of the run.
+#
+# File references work for controller-manager.conf (its static pod mounts /etc/kubernetes/pki)
+# and for kubelet.conf/admin.conf (host-side consumers, file exists on disk). The scheduler's
+# static pod does NOT mount /etc/kubernetes/pki — a file reference there crashes the binary at
+# boot ("unable to read certificate-authority ... no such file or directory") and it crash-loops
+# forever, leaving every unscheduled pod (including CNI DaemonSets) stuck Pending. So the
+# scheduler conf gets the IPA CA embedded instead, matching kubeadm's own convention.
+- name: Ipa-certs | patch kubeconfigs to use IPA CA cert file reference
+  ansible.builtin.replace:
+    path: "{{ item }}"
+    regexp: '^(\s*)certificate-authority-data:.*'
+    replace: '\1certificate-authority: /etc/kubernetes/pki/ca.crt'
+  loop:
+    - /etc/kubernetes/controller-manager.conf
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+  become: true
+
+- name: Ipa-certs | embed IPA CA in scheduler.conf (static pod lacks pki mount)
+  ansible.builtin.replace:
+    path: /etc/kubernetes/scheduler.conf
+    regexp: '^(\s*)certificate-authority(-data)?:.*'
+    replace: '\1certificate-authority-data: {{ ca_bundle_ipa.content }}'
+  become: true
+
 - name: Ipa-certs | update API server static pod to use merged CA bundle for client auth
   ansible.builtin.replace:
     path: /etc/kubernetes/manifests/kube-apiserver.yaml

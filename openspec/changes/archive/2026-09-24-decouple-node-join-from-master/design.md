@@ -59,6 +59,7 @@ The "wait for node to appear" step originally ran `kubectl get node <host> --kub
 - [Join verification via master `admin.conf` fails with TLS unknown authority in single-pass — admin.conf is re-pointed only by the later `ipa-pki-swap`] → D7 verifies from the node's own identity; validated end-to-end on parallels (task 4.4).
 - [Per-node cert expiry/renewal now per-host rather than one shared cert] → Out of scope for this change; note that each node's cert carries its own validity, same as today's shared cert.
 - [Re-converge idempotency] → Guard the per-node cert request by `stat` (mirrors the master pattern); join skips when `/etc/kubernetes/kubelet.conf` already exists.
+- [Scheduler crash-loop after CA re-point: its static pod does not mount `/etc/kubernetes/pki`, so a file-reference `certificate-authority:` in `scheduler.conf` crashes it at boot and every unscheduled pod (CNI DaemonSets) stays Pending] → Embed the IPA CA as `certificate-authority-data` in `scheduler.conf` only; KCM/kubelet/admin confs keep file references. A scheduler-Ready gate in `ipa-pki-swap.yml` fails converge loudly if it regresses (task 5.3).
 - [Actual wall-clock win depends on parallelism] → Ensure enough Ansible forks and that node-prep tasks are genuinely independent of master; measure before/after converge time.
 
 ## Migration Plan
