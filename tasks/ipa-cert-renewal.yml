@@ -22,29 +22,41 @@
   ansible.builtin.shell: |
     set -o pipefail
     echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    if ! ipa caacl-show kubernetes-ca-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
+    if ipa caacl-show kubernetes-ca-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
+      echo "ACL-GRANT-PRESENT"
+    else
       ipa caacl-add-host kubernetes-ca-acl --hosts={{ item }}
+      echo "ACL-GRANT-ADDED"
     fi
   loop: "{{ groups[kube_masters_group] + groups[kube_nodes_group] }}"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
+  changed_when: "'ACL-GRANT-ADDED' in stdout"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
   ansible.builtin.shell: |
-    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    ipa-getkeytab -p kubeclusteradm@{{ company_domain | upper }} -k /tmp/kubeclusteradm.keytab
+    set -o pipefail
+    if klist -kte /tmp/kubeclusteradm.keytab 2>/dev/null | grep -q "kubeclusteradm@"; then
+      echo "KEYTAB-PRESENT"
+    else
+      echo '{{ company_realm_password }}' | kinit admin > /dev/null
+      ipa-getkeytab -p kubeclusteradm@{{ company_domain | upper }} -k /tmp/kubeclusteradm.keytab
+      echo "KEYTAB-GENERATED"
+    fi
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
+  changed_when: "'KEYTAB-GENERATED' in stdout"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Fetch keytab as base64
-  ansible.builtin.shell: base64 -w0 /tmp/kubeclusteradm.keytab
+  ansible.builtin.command: base64 -w0 /tmp/kubeclusteradm.keytab
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   register: kca_keytab_b64
+  changed_when: false
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Install kubeclusteradm keytab for admin cert renewal
