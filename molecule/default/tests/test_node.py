@@ -1,5 +1,6 @@
 """Role testing files using testinfra."""
 import os
+import time
 
 
 def _worker_hosts():
@@ -81,3 +82,54 @@ def test_node_ca_chains_to_ipa_root(host):
             "openssl verify -CAfile /etc/ipa/ca.crt /etc/kubernetes/pki/ca.crt"
         )
     assert 'OK' in cmd.stdout
+
+
+# Unattended certificate renewal tests
+
+def test_cert_renewal_script_installed(host):
+    f = host.file("/usr/local/sbin/kube-cert-renew.sh")
+    assert f.exists
+    assert f.is_file
+
+
+def test_cert_renewal_timer_enabled_and_active(host):
+    with host.sudo():
+        enabled = host.run("systemctl is-enabled kube-cert-renew.timer").stdout
+        active = host.run("systemctl is-active kube-cert-renew.timer").stdout
+    assert 'enabled' in enabled
+    assert 'active' in active
+
+
+def test_cert_renewal_noop_tick_does_not_churn(host):
+    """A tick with nothing eligible must not rewrite the cert or restart kubelet (no-churn)."""
+    serial_cmd = "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -serial"
+    enter_cmd = "systemctl show kubelet -p ActiveEnterTimestamp"
+    with host.sudo():
+        serial_before = host.run(serial_cmd).stdout
+        enter_before = host.run(enter_cmd).stdout
+        cmd = host.run("RENEW_THRESHOLD_DAYS=1 /usr/local/sbin/kube-cert-renew.sh")
+        assert cmd.rc == 0, f"renewal script failed: {cmd.stderr}"
+        serial_after = host.run(serial_cmd).stdout
+        enter_after = host.run(enter_cmd).stdout
+    assert serial_before == serial_after, "no-op tick must not rewrite the node client cert"
+    assert enter_before == enter_after, "no-op tick must not restart kubelet"
+
+
+def test_cert_renewal_forced_eligibility_extends_node_client(host):
+    """Force eligibility: the full renewal path re-issues from the existing key and reloads
+    kubelet. Placed last on purpose — it restarts kubelet (brief NotReady window)."""
+    serial_cmd = "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -serial"
+    with host.sudo():
+        serial_before = host.run(serial_cmd).stdout
+        cmd = host.run("RENEW_THRESHOLD_DAYS=3650 /usr/local/sbin/kube-cert-renew.sh")
+        assert cmd.rc == 0, f"forced renewal failed: {cmd.stderr}"
+        serial_after = host.run(serial_cmd).stdout
+        # kubelet restart is async from the script's point of view; poll for readiness.
+        kubelet_active = ""
+        for _ in range(30):
+            kubelet_active = host.run("systemctl is-active kubelet").stdout
+            if 'active' in kubelet_active:
+                break
+            time.sleep(2)
+    assert serial_before != serial_after, "forced eligibility must re-issue the node client cert"
+    assert 'active' in kubelet_active

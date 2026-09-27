@@ -1,8 +1,10 @@
+# Kube Cert Renewal
+
 ## Purpose
 
 Defines how all IPA-issued Kubernetes cluster certificates are continuously renewed so the cluster stays healthy past individual certificate validity windows, without manual re-convergence.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Continuous renewal via a per-host timer
 Every host that holds a cluster certificate (the master and every worker) SHALL run a scheduled timer that triggers certificate renewal on a recurring basis. Renewal SHALL be continuous and self-healing — it MUST NOT depend on an Ansible converge run occurring.
@@ -15,16 +17,20 @@ Every host that holds a cluster certificate (the master and every worker) SHALL 
 - **WHEN** no Ansible converge is executed but a certificate becomes eligible for renewal
 - **THEN** the per-host timer still renews it, so liveness does not depend on operator action
 
-### Requirement: Native FreeIPA renewal mechanism
-Renewal SHALL use native FreeIPA renewal (`ipa-cert-renew`) rather than re-issuing via a fresh CSR. The relevant profiles and CA SHALL be configured to permit renewal so the in-place renew succeeds while preserving each certificate's identity (subject/principal).
+### Requirement: Identity-preserving keytab-driven renewal
+Renewal SHALL re-issue each eligible certificate via `ipa cert-request --ca=kubernetes-ca`, authenticated with a Kerberos keytab (host keytab for node/control-plane certs, the `kubeclusteradm` user keytab for the admin cert) — no administrator password SHALL be required at runtime. The renewed certificate SHALL preserve its identity: same subject/principal and same private key as before.
 
-#### Scenario: Certificate renewed in place
+#### Scenario: Certificate renewed with identity preserved
 - **WHEN** an eligible cluster certificate is renewed by the timer
-- **THEN** it is extended with its subject/principal unchanged (no new serial/identity churn) and a later `notAfter`
+- **THEN** the new certificate has the same subject/principal, uses the same private key, and carries a later `notAfter`
 
-#### Scenario: Profile permits renewal
-- **WHEN** the node, admin, and control-plane profiles are inspected after convergence
-- **THEN** each is configured to allow renewal so `ipa-cert-renew` can act on its certificates
+#### Scenario: Renewal requires no admin credentials at runtime
+- **WHEN** the timer renews a certificate
+- **THEN** it authenticates using only a local keytab (no interactive or stored administrator password)
+
+#### Scenario: CA ACL permits each principal type
+- **WHEN** the CA ACL for `kubernetes-ca` is inspected after convergence
+- **THEN** it grants the worker/master hosts and the user category so every cluster certificate's principal can be re-issued
 
 ### Requirement: All expiring cluster certificates are covered
 Renewal SHALL cover every IPA-issued cluster certificate that carries a finite validity: worker node certs, the master admin cert, and control-plane component certs. No cluster certificate SHALL be left to expire unattended.
@@ -53,7 +59,7 @@ After a successful renewal, the new certificate SHALL be deployed to its expecte
 - **THEN** `admin.conf` references the renewed certificate and `kubectl` via that config still authenticates successfully
 
 ### Requirement: Renewal is idempotent and churn-free
-A timer tick SHALL act only on certificates actually eligible for renewal. When no certificate is due, a tick MUST be a no-op — it MUST NOT redeploy unchanged certificates or restart services unnecessarily.
+A timer tick SHALL act only on certificates whose remaining validity has dropped below the renewal threshold (default 30 days). When no certificate is due, a tick MUST be a no-op — it MUST NOT re-issue unchanged certificates or restart services unnecessarily.
 
 #### Scenario: No-op when nothing is eligible
 - **WHEN** the timer fires while all cluster certificates are still well within their validity window

@@ -1,0 +1,117 @@
+---
+# Provision unattended certificate renewal (keytab-based; no admin password at runtime).
+# Master only: grant the IT Specialist role to this host (needed for write access on the
+# apiserver SAN principals), grant every kube host access to kubernetes-ca via its CA ACL
+# (renewal runs as the host principal, which usercat=all does not cover), and install the
+# kubeclusteradm user keytab used to renew the cluster-admin client certificate.
+# All hosts: install the renewal script + systemd timer.
+
+- name: Ipa-cert-renewal | Grant IT Specialist role to master host (SAN write access)
+  freeipa.ansible_freeipa.iparole:
+    ipaadmin_password: "{{ company_realm_password }}"
+    name: "IT Specialist"
+    state: present
+    action: member
+    host: ["{{ orchestration_host_hostname }}"]
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | Grant kubernetes-ca access to all kube hosts (host-principal renewal)
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    if ! ipa caacl-show kubernetes-ca-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
+      ipa caacl-add-host kubernetes-ca-acl --hosts={{ item }}
+    fi
+  loop: "{{ groups[kube_masters_group] + groups[kube_nodes_group] }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
+  ansible.builtin.shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa-getkeytab -p kubeclusteradm@{{ company_domain | upper }} -k /tmp/kubeclusteradm.keytab
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | Fetch keytab as base64
+  ansible.builtin.shell: base64 -w0 /tmp/kubeclusteradm.keytab
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  register: kca_keytab_b64
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | Install kubeclusteradm keytab for admin cert renewal
+  ansible.builtin.copy:
+    content: "{{ kca_keytab_b64.stdout | b64decode }}"
+    dest: "{{ kube_credential_folder }}/kubeclusteradm.keytab"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: kube_masters_group in group_names
+
+# IPA's SAN validation (ipalib/certtools _validate_san_ips) discovers the zone of each IP
+# SAN through the system resolver. A public upstream in the private-domain scope answers
+# NXDOMAIN for the zone SOA before local bind does, so zone discovery falls back to "." and
+# every IP SAN is reported unreachable. Keep the idm domain scope pointed at local bind only.
+- name: Ipa-cert-renewal | keep idm resolved domain scope free of public resolvers (SAN validation)
+  ansible.builtin.copy:
+    content: |
+      [Resolve]
+      DNS={{ orchestration_idm_ip }}
+      Domains=~{{ company_domain }}
+    dest: /etc/systemd/resolved.conf.d/head.conf
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  register: idm_head_conf
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | restart systemd-resolved on idm when head.conf changed
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  when:
+    - kube_masters_group in group_names
+    - idm_head_conf is defined
+    - idm_head_conf is changed
+
+- name: Ipa-cert-renewal | Install certificate renewal script
+  ansible.builtin.template:
+    src: kube-cert-renew.sh.j2
+    dest: /usr/local/sbin/kube-cert-renew.sh
+    mode: "0755"
+  become: true
+
+- name: Ipa-cert-renewal | Install systemd service unit
+  ansible.builtin.copy:
+    content: "{{ lookup('template', 'kube-cert-renew.service.j2') }}"
+    dest: /etc/systemd/system/kube-cert-renew.service
+    mode: "0644"
+  become: true
+
+- name: Ipa-cert-renewal | Install systemd timer unit
+  ansible.builtin.copy:
+    content: "{{ lookup('template', 'kube-cert-renew.timer.j2') }}"
+    dest: /etc/systemd/system/kube-cert-renew.timer
+    mode: "0644"
+  become: true
+
+- name: Ipa-cert-renewal | Enable and start renewal timer
+  ansible.builtin.systemd:
+    name: kube-cert-renew.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

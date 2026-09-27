@@ -6,7 +6,7 @@ See proposal.md for motivation. All IPA-issued cluster certs are created once vi
 
 **Goals:**
 - Continuous, self-healing renewal of every expiring cluster cert (worker + master admin + control-plane), independent of converge runs.
-- In-place native renewal that preserves certificate identity.
+- Identity-preserving renewal (same subject/principal/key) without any admin password at runtime.
 - Post-renewal deployment + service reload so running components use the renewed cert.
 
 **Non-Goals:**
@@ -20,12 +20,17 @@ See proposal.md for motivation. All IPA-issued cluster certs are created once vi
 Each host runs a persistent systemd timer that fires on schedule and triggers renewal. This makes renewal self-healing — it survives between converges, so a cert cannot silently expire just because no one re-converged.
 
 - **Alternative considered:** converge-driven threshold (renew only when a converge runs and the cert is near expiry). Rejected — if no converge happens before expiry, the cert lapses; liveness would depend on operator action.
-- **Interval:** daily tick with `Persistent=true` so missed runs catch up after reboot/downtime. `ipa-cert-renew` is itself a no-op when nothing is eligible, so frequent ticks are cheap (see D5).
+- **Interval:** weekly tick with `RandomizedDelaySec` jitter to stagger reloads across hosts, plus `Persistent=true` so missed runs catch up after reboot/downtime. Ticks are cheap because renewal is eligibility-gated (see D5).
 
-### D2: Mechanism = native `ipa-cert-renew` (not re-issue via fresh CSR)
-Use FreeIPA's native renewal so certs renew in place with their subject/principal preserved — no serial churn, minimal redeploy. Requires the profile/CA to permit renewal and each host to have an IPA client keytab (already true: hosts are IPA clients).
+### D2: Mechanism = keytab-driven re-issue from the same key (not native renew)
+Spike finding: FreeIPA has **no native in-place renew** (`ipa-cert-renew` does not exist), and certmonger's IPA helper can only target the default CA `ipa`, so it cannot act on our custom `kubernetes-ca` (ACL denial reproduced). The adopted mechanism re-issues each eligible cert via `ipa cert-request --ca=kubernetes-ca`, authenticated with a keytab — no admin password at runtime:
+- **Worker node cert:** host keytab (`/etc/krb5.keytab`) → principal `host/<node>`, profile `kubernetesNodes` (profile rewrites the subject to `system:node:<node>`).
+- **Control-plane certs (apiserver, front-proxy):** master host keytab → principals `HTTP/<master>` / `host/<master>`, profile `kubeAdministrators`.
+- **Master admin cert:** `kubeclusteradm` user keytab (generated on the IDM at converge time) → principal `kubeclusteradm`, profile `kubeAdministrators`.
 
-- **Alternative considered:** re-issue via `ipacert` with a fresh CSR. Rejected as primary — new serial each cycle, more redeploy complexity. Retained as documented fallback if native renew proves unsupported (see Open Questions / spike).
+Identity is preserved because the CSR reuses the existing private key and the profile rewrites the subject — only the serial/validity change. Requires the CA ACL (`kubernetes-ca-acl`) to permit each principal type (hosts + user category all) — verified via `ipa caacl-show`.
+
+- **Alternative considered:** certmonger tracking (`ipa-getcert start-tracking`). Rejected after spike — its IPA helper targets only the default CA, so renewal of `kubernetes-ca`-issued certs is denied by the ACL.
 - **Coupling:** designed group-aware from the start — the timer + renewal loop over the full worker group plus master, so it composes with `support-n-worker-nodes` without a rewrite.
 
 ### D3: Scope = all expiring cluster certs
@@ -38,11 +43,11 @@ After a renew succeeds, redeploy to path and reload/restart the affected service
 - **Control-plane:** component cert paths → restart the affected static pod(s); API-server restart is the riskiest and is gated/staggered.
 
 ### D5: Idempotency / no churn
-A timer tick acts only on certs actually eligible for renewal (FreeIPA's own eligibility policy). When nothing is due, the tick is a no-op — no cert rewrite, no service restart — so repeated ticks do not churn healthy components.
+A timer tick acts only on certs actually eligible for renewal: a cert is eligible when its remaining validity drops below a threshold (default 30 days, configurable via `kube_cert_renew_threshold_days`). When nothing is due, the tick is a no-op — no cert rewrite, no service restart — so repeated ticks do not churn healthy components.
 
 ## Risks / Trade-offs
 
-- [Native `ipa-cert-renew` may be unsupported by our CA/profile] → Run a viability spike first (task 1.1); if it fails, fall back to re-issue-via-ipacert and adjust D2/D4 accordingly.
+- [Re-issue changes the serial number each renewal] → Inherent to any X509 re-issue; identity (subject/principal/key) is preserved and only renewals near expiry trigger a new serial, so churn is minimal (~once per validity window).
 - [Service restart causes brief node NotReady / API blip] → Stagger timer across hosts (jitter) so nodes don't all reload simultaneously; gate control-plane static-pod restarts carefully and prefer reload over full restart where possible.
 - [Host reboot loses the schedule] → systemd timers persist on disk and `Persistent=true` catches up missed runs after boot.
 - [Renewal requires IPA reachable from each host] → Hosts are already IPA clients (keytab present); if IDM is down, renewal defers but certs remain valid until their existing expiry — no immediate breakage.
@@ -53,5 +58,5 @@ Additive and non-disruptive: install the timer on existing hosts; a running clus
 
 ## Open Questions
 
-- **Native-renew viability:** confirm `ipa-cert-renew` works against our CA/profiles (renewal enabled) — this is the go/no-go spike; if unsupported, adopt the re-issue fallback.
-- **Timer interval + jitter values:** tune during implementation (default daily + per-host random offset).
+- **Resolved (spike):** native renew does not exist and certmonger cannot target our custom CA — keytab-driven re-issue adopted (see D2).
+- **Timer interval + jitter values:** weekly tick + 4h randomized delay chosen; tune if needed.

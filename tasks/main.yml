@@ -67,6 +67,11 @@
   when:
     - kube_masters_group in group_names
 
+- name: Install unattended certificate renewal timers
+  ansible.builtin.include_tasks: ipa-cert-renewal.yml
+  when:
+    - kube_masters_group in group_names or kube_nodes_group in group_names
+
 - name: Create NFS-type persistent volumes on master
   ansible.builtin.include_tasks: nfs-mountpoints.yml
   when:
