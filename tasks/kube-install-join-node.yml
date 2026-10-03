@@ -191,14 +191,18 @@
       become: true
 
     - name: Kube-install-join | wait for node to appear in cluster
-      ansible.builtin.shell: |
-        kubectl get node {{ inventory_hostname }} --kubeconfig /etc/kubernetes/kubelet.conf
+      # Per-node identity via kubelet.conf (no admin.conf dependency); the python client is already
+      # installed on nodes by prereq.yml. k8s_info is read-only, so no changed_when needed.
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        name: "{{ inventory_hostname }}"
+        kubeconfig: /etc/kubernetes/kubelet.conf
       become: true
       retries: 40
       delay: 5
       register: node_check
-      until: node_check.rc == 0
-      changed_when: false
+      until: node_check.resources | length > 0
 
   rescue:
     - name: Kube-install-join | capture kubelet logs for debugging

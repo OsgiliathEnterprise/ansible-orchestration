@@ -64,33 +64,46 @@
 # trust) reports Ready=True yet never renews its leader lease. A fresh lease proves it can
 # actually talk to the API; otherwise fail loudly instead of converging green with dead controllers.
 - name: Ipa-pki-swap | wait for controller manager to hold a fresh leader lease
-  # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
-  ansible.builtin.shell: |
-    renew_time=$(kubectl --kubeconfig /etc/kubernetes/admin.conf get lease -n kube-system kube-controller-manager -o jsonpath='{.spec.renewTime}' 2>/dev/null) || renew_time=""
-    if [ -z "$renew_time" ]; then echo "no-lease"; exit 0; fi
-    age=$(( $(date +%s) - $(date -d "$renew_time" +%s) ))
-    if [ "$age" -lt 90 ]; then echo "fresh:$age"; else echo "stale:$age"; fi
+  kubernetes.core.k8s_info:
+    api_version: coordination.k8s.io/v1
+    kind: Lease
+    namespace: kube-system
+    name: kube-controller-manager
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
   register: cm_lease
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: "'fresh' in cm_lease.stdout"
+  # Freshness check runs in one controller-side python3 call: ansible-core 2.21's strftime filter no longer
+  # accepts a piped datetime (signature is now strftime(format, epoch)), and renewTime carries fractional
+  # seconds that to_datetime's explicit format cannot parse. fromisoformat handles both shapes cleanly.
+  until: >-
+    (cm_lease.resources | length == 1) and
+    (lookup('pipe', 'RENEW_TIME=' ~ (cm_lease.resources[0].spec.renewTime | default('1970-01-01T00:00:00Z')) ~ ' python3 -c "' ~ "import os,datetime;r=datetime.datetime.fromisoformat(os.environ['RENEW_TIME'].replace('Z','+00:00'));n=datetime.datetime.now(datetime.timezone.utc);print(str((n-r).total_seconds()<90).lower())" ~ '"') == 'true')
   delegate_to: "{{ groups[kube_masters_group] | first }}"
 
 # Symmetric with the KCM lease gate above: a crash-looping scheduler (e.g. broken CA trust in
 # its kubeconfig) leaves every unscheduled pod — CNI DaemonSets included — stuck Pending, so
 # converge must not pass it silently.
 - name: Ipa-pki-swap | wait for scheduler static pod to report Ready
-  # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
-  ansible.builtin.shell: |
-    kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-scheduler -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo ""
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - component=kube-scheduler
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
   register: scheduler_ready
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: scheduler_ready.stdout == 'true'
+  until: >-
+    (scheduler_ready.resources | length == 1) and
+    ((scheduler_ready.resources[0].status.containerStatuses | default([])) | selectattr('ready', 'equalto', true) | list | length
+     == (scheduler_ready.resources[0].status.containerStatuses | default([]) | length)) and
+    ((scheduler_ready.resources[0].status.containerStatuses | default([]) | length > 0))
   delegate_to: "{{ groups[kube_masters_group] | first }}"
 
 - name: Ipa-pki-swap | add API server override block to kubelet config
@@ -107,14 +120,14 @@
   notify: ansible-orchestration | refresh kube
 
 - name: Ipa-pki-swap | verify kubectl can connect with new CA
-  ansible.builtin.shell: |
-    kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info
+  kubernetes.core.k8s_cluster_info:
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
   register: kubectl_verify
   retries: 6
   delay: 10
-  until: "'Kubernetes control plane' in kubectl_verify.stdout"
+  until: (kubectl_verify.version | default({})) | length > 0
 
 # Data-plane recovery must run last: after the kubelet refresh (above) so a recreated pod
 # mounts the post-swap CA, and after cluster stabilization. No-op when Calico is absent.

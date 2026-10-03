@@ -1,9 +1,23 @@
 """Role testing files using testinfra."""
 import base64
+import json
 import os
 import re
 
 testinfra_hosts = ["master.osgiliath.test"]
+
+
+def _all_containers_ready(pod):
+    """True when the pod reports container statuses and every container is ready.
+
+    An empty status (pod not started yet) counts as NOT ready."""
+    cs = (pod.get("status") or {}).get("containerStatuses") or []
+    return bool(cs) and all(c.get("ready") for c in cs)
+
+
+def _not_ready_names(items):
+    """Names of pods from a `kubectl get pods -o json` payload that are not fully ready."""
+    return [p["metadata"]["name"] for p in items if not _all_containers_ready(p)]
 
 
 def _worker_hosts():
@@ -105,6 +119,89 @@ def test_tigera_operator_pods_running(host):
                 break
             time.sleep(15)
         assert int(cmd.stdout) > 0
+
+
+# CNI and DNS health tests
+
+def test_coredns_pods_ready(host):
+    """Every coredns replica has all containers Ready. coredns is restarted after the calico
+    install (kube-install.yml), so allow time for the rollout to settle."""
+    import time
+    command = "kubectl get pods -n kube-system -l k8s-app=kube-dns -o json"
+    with host.sudo():
+        total, bad = 0, None
+        for _ in range(12):
+            cmd = host.run(command)
+            if cmd.rc == 0:
+                items = json.loads(cmd.stdout).get("items", [])
+                total, bad = len(items), _not_ready_names(items)
+                if total > 0 and not bad:
+                    break
+            time.sleep(15)
+    assert total > 0, "no coredns pods found in kube-system"
+    assert not bad, f"coredns pod(s) not fully ready: {bad}"
+
+
+def test_cluster_dns_resolves_via_coredns(host):
+    """Functional check: querying CoreDNS at the kube-dns ClusterIP resolves the kubernetes
+    service — proves DNS is actually serving answers, not just that its pods are up."""
+    import time
+    command = (
+        'dig @$(kubectl get svc -n kube-system kube-dns -o jsonpath="{.spec.clusterIP}") '
+        "kubernetes.default.svc.cluster.local +short"
+    )
+    with host.sudo():
+        cmd = None
+        for _ in range(12):
+            cmd = host.run(command)
+            if cmd.rc == 0 and any(re.match(r"\d+\.\d+\.\d+\.\d+", line) for line in cmd.stdout.splitlines()):
+                break
+            time.sleep(15)
+    assert cmd is not None and cmd.rc == 0, f"dig failed: {cmd.stderr if cmd else 'no output'}"
+    resolved = [line for line in cmd.stdout.splitlines() if re.match(r"\d+\.\d+\.\d+\.\d+", line)]
+    assert resolved, (
+        f"kubernetes.default.svc.cluster.local did not resolve via CoreDNS: {cmd.stdout!r}"
+    )
+
+
+def test_calico_pods_ready(host):
+    """Core calico workloads (node/typha/kube-controllers) have every container Ready, and the
+    calico-node DaemonSet has exactly one Ready pod per inventory node — 3/3 in the parallels
+    scenario. No orphan pods, no missing nodes: the data plane is complete.
+
+    Only core workloads are checked: calico-system also hosts non-calico pods in this setup."""
+    import time
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    runner = ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"])
+    expected_nodes = len(runner.get_hosts("kube_master") + runner.get_hosts("kube_node"))
+    pods_command = (
+        'kubectl get pods -n calico-system '
+        '-l "k8s-app in (calico-node,calico-typha,calico-kube-controllers)" -o json'
+    )
+    with host.sudo():
+        total, bad, node_pods, ready_nodes = 0, None, [], 0
+        for _ in range(12):
+            cmd = host.run(pods_command)
+            if cmd.rc == 0:
+                items = json.loads(cmd.stdout).get("items", [])
+                total = len(items)
+                bad = _not_ready_names(items)
+                node_pods = [p for p in items if p["metadata"]["name"].startswith("calico-node-")]
+                ready_nodes = sum(1 for p in node_pods if _all_containers_ready(p))
+                if total > 0 and not bad and len(node_pods) == expected_nodes and ready_nodes == expected_nodes:
+                    break
+            time.sleep(15)
+    assert total > 0, "no core calico pods found in calico-system"
+    assert not bad, f"calico pod(s) not fully ready: {bad}"
+    assert len(node_pods) == expected_nodes, (
+        f"expected {expected_nodes} calico-node pods, found {len(node_pods)}"
+    )
+    assert ready_nodes == expected_nodes, (
+        f"only {ready_nodes}/{expected_nodes} calico-node pods are Ready"
+    )
 
 
 def test_kubectl_get_nodes_matches_inventory(host):

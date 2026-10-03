@@ -25,4 +25,5 @@ kubernetes_api_host: "127.0.0.1"
 kubernetes_api_port: 6443
 kubernetes_api_ready_retries: 12
 kubernetes_api_ready_delay: 10
+kubernetes_rollout_wait_timeout: 300
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"

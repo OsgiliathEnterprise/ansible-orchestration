@@ -215,16 +215,16 @@
   until: cert_chain_verify.rc == 0
 
 - name: Ipa-certs | verify kubectl can connect to API server (best effort, final check in ipa-pki-swap)
-  ansible.builtin.shell: |
-    kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info 2>&1
+  kubernetes.core.k8s_cluster_info:
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
   failed_when: false
   register: kubectl_cluster_info
   retries: 3
   delay: 10
-  until: kubectl_cluster_info.rc == 0
+  until: (kubectl_cluster_info.version | default({})) | length > 0
 
-- name: Ipa-certs | show kubectl cluster-info output
+- name: Ipa-certs | show API server version from cluster-info check
   ansible.builtin.debug:
-    var: kubectl_cluster_info.stdout_lines
+    var: "kubectl_cluster_info.version | default({})"

@@ -110,9 +110,18 @@
     - namespace-requestor-crb
 
 - name: Admin-user | configure kubernetes admin.conf with IPA signed credentials
-  ansible.builtin.command: "kubectl config set-credentials kubernetes-admin --client-key={{ kube_credential_folder }}/kubeadm.pem --client-certificate={{ kube_credential_folder }}/kubeadm.crt --kubeconfig=/etc/kubernetes/admin.conf"
-  failed_when: false
-  changed_when: False
+  # behavior=replace (not the default merge): kubeadm's original entry carries inline
+  # client-certificate-data/client-key-data, and merging would leave both variants in place —
+  # kubectl then refuses to run ("client-cert-data and client-cert are both specified").
+  # Replacing the whole user entry mirrors what `kubectl config set-credentials` used to do.
+  kubernetes.core.kubeconfig:
+    path: /etc/kubernetes/admin.conf
+    users:
+      - name: kubernetes-admin
+        behavior: replace
+        user:
+          client-certificate: "{{ kube_credential_folder }}/kubeadm.crt"
+          client-key: "{{ kube_credential_folder }}/kubeadm.pem"
   become: true
 
 - name: Admin-user | cat kubernetes admin certificates
