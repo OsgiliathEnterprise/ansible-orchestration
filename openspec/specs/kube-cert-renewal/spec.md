@@ -64,3 +64,26 @@ A timer tick SHALL act only on certificates whose remaining validity has dropped
 #### Scenario: No-op when nothing is eligible
 - **WHEN** the timer fires while all cluster certificates are still well within their validity window
 - **THEN** no certificate is rewritten and no service is restarted by that tick
+
+### Requirement: Renewal setup converges idempotently with accurate change reporting
+The renewal-setup tasks that grant kubernetes-ca ACL access to each kube host and generate the `kubeclusteradm` keytab SHALL be re-runnable without failing. When a precondition is already satisfied (the host is already listed in `kubernetes-ca-acl`, or the keytab already exists), the task SHALL report no change; when it performs work, it SHALL report changed. Each loop item's outcome SHALL be evaluated against that item's own result, so per-host outcomes are reported independently within a single run.
+
+#### Scenario: Re-converge on an already-converged cluster is green
+- **WHEN** renewal setup runs again after every kube host already has kubernetes-ca ACL access and the `kubeclusteradm` keytab exists
+- **THEN** the ACL-grant task reports no change for every host, the keytab task reports no change, and no task fails with an undefined-variable error
+
+#### Scenario: Mixed state within one run evaluates per host
+- **WHEN** renewal setup runs in a state where some hosts already have kubernetes-ca ACL access and others do not
+- **THEN** each already-listed host's item reports no change while each newly added host's item reports changed, all within the same task run
+
+### Requirement: SAN-validation DNS preconditions are owned by infrastructure roles
+Certificate requests carrying IP SANs SHALL succeed without renewal tasks modifying resolver configuration. The scoped dual-nameserver resolved config installed by `tcharl.freeipa_server` (idm) and `tcharl.ansible_securehost` (clients) during prepare SHALL satisfy IPA's zone discovery for IP SANs, and renewal tasks MUST NOT write to `/etc/systemd/resolved.conf.d`.
+
+#### Scenario: IP-SAN request succeeds without renewal touching resolver config
+- **WHEN** a certificate request with an IP SAN is issued on the IPA server host after a converged prepare+converge cycle
+- **THEN** zone discovery resolves through local bind and no IP SAN is reported unreachable
+- **AND** no task in the renewal flow wrote or restarted `/etc/systemd/resolved.conf.d`
+
+#### Scenario: Renewal setup leaves the drop-in untouched
+- **WHEN** renewal setup runs on a converged cluster
+- **THEN** `/etc/systemd/resolved.conf.d/head.conf` content is unchanged from what the infrastructure roles deployed (scoped dual-nameserver config)

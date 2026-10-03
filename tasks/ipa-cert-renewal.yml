@@ -32,7 +32,8 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
-  changed_when: "'ACL-GRANT-ADDED' in stdout"
+  register: caacl_grant_result
+  changed_when: "'ACL-GRANT-ADDED' in caacl_grant_result.stdout"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
@@ -48,13 +49,15 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
-  changed_when: "'KEYTAB-GENERATED' in stdout"
+  register: kubeclusteradm_keytab_result
+  changed_when: "'KEYTAB-GENERATED' in kubeclusteradm_keytab_result.stdout"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Fetch keytab as base64
   ansible.builtin.command: base64 -w0 /tmp/kubeclusteradm.keytab
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  no_log: "{{ secure_logs }}"
   register: kca_keytab_b64
   changed_when: false
   when: kube_masters_group in group_names
@@ -69,35 +72,9 @@
   become: true
   when: kube_masters_group in group_names
 
-# IPA's SAN validation (ipalib/certtools _validate_san_ips) discovers the zone of each IP
-# SAN through the system resolver. A public upstream in the private-domain scope answers
-# NXDOMAIN for the zone SOA before local bind does, so zone discovery falls back to "." and
-# every IP SAN is reported unreachable. Keep the idm domain scope pointed at local bind only.
-- name: Ipa-cert-renewal | keep idm resolved domain scope free of public resolvers (SAN validation)
-  ansible.builtin.copy:
-    content: |
-      [Resolve]
-      DNS={{ orchestration_idm_ip }}
-      Domains=~{{ company_domain }}
-    dest: /etc/systemd/resolved.conf.d/head.conf
-    owner: root
-    group: root
-    mode: "0644"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  register: idm_head_conf
-  when: kube_masters_group in group_names
-
-- name: Ipa-cert-renewal | restart systemd-resolved on idm when head.conf changed
-  ansible.builtin.systemd:
-    name: systemd-resolved
-    state: restarted
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  when:
-    - kube_masters_group in group_names
-    - idm_head_conf is defined
-    - idm_head_conf is changed
+# IPA's SAN-validation DNS precondition (zone discovery for IP SANs) is satisfied by the
+# scoped dual-nameserver resolved config that tcharl.freeipa_server / tcharl.ansible_securehost
+# deploy during prepare — renewal no longer manages resolver configuration here.
 
 - name: Ipa-cert-renewal | Install certificate renewal script
   ansible.builtin.template:
