@@ -1,6 +1,11 @@
 ---
-- name: Converge master
-  hosts: master.osgiliath.test
+# Single order-tolerant play: master + all worker nodes run the role together in one pass
+# instead of two sequential plays (master-fully-done -> then-node). Cross-host dependencies
+# are handled by readiness gates inside the role (API-server /healthz + FreeIPA CA/profile
+# availability), so a worker no longer requires a fully-completed control-plane play.
+# Targeting group unions means adding a worker is a molecule.yml-only change.
+- name: Converge cluster
+  hosts: kube_master,kube_node
   vars:
     secure_logs: False
     standalone_role: False
@@ -10,8 +15,6 @@
     idm_preferred_nic: "enp0s5"
     master_preferred_nic: "enp0s5"
     reset_kube: True
-  #        kube_alt_names:
-#          - "kubeadm.osgiliath.net"
     nfs_mountpoints:
       - host: idm.osgiliath.test
         mountpoints:
@@ -20,19 +23,5 @@
             kubernetes_volumes:
               - subtree: /artefactrepo
                 mountsize: 1
-  roles:
-    - role: tcharl.ansible_orchestration
-
-- name: Converge node
-  hosts: node1.osgiliath.test
-  vars:
-    secure_logs: False
-    standalone_role: False
-    reset_kube: True
-    company_domain: osgiliath.test
-    preferred_nic: "enp0s5"
-    master_preferred_nic: "enp0s5"
-    idm_preferred_nic: "enp0s5"
-    kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
   roles:
     - role: tcharl.ansible_orchestration

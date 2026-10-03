@@ -1,0 +1,117 @@
+#!/bin/bash
+# Renew kubernetes certificates from the IPA kubernetes-ca without admin credentials.
+# Each certificate is re-issued under its own principal using a Kerberos keytab:
+#   - apiserver + front-proxy: host keytab (/etc/krb5.keytab), principal host/<master>
+#   - cluster-admin client cert: kubeclusteradm user keytab (master only)
+#   - node-client: host keytab (nodes only), principal host/<node>
+# The kubernetes-ca profile rewrites the CSR subject and the existing private key is
+# reused, so renewed certificates keep exactly the same identity as the originals.
+# Renewal is eligibility-gated: a cert is only re-issued when its remaining validity
+# drops below RENEW_THRESHOLD_DAYS, so ticks with nothing due are cheap no-ops.
+set -euo pipefail
+
+LOG_FILE=/var/log/kube-cert-renew.log
+exec >>"$LOG_FILE" 2>&1
+
+HOSTNAME="{{ orchestration_host_hostname }}"
+DOMAIN="{{ company_domain }}"
+PKI_DIR="{{ kubernetes_certificates_path | regex_replace('/+$', '') }}"
+CRED_DIR="{{ kube_credential_folder }}"
+SERVICE_IP="{{ (kube_service_cidr | default('10.96.0.0/12')) | ansible.utils.next_nth_usable(1) }}"
+MASTER_IP="{{ orchestration_master_ip }}"
+# Overridable via environment so eligibility can be forced for testing.
+RENEW_THRESHOLD_DAYS="${RENEW_THRESHOLD_DAYS:-{{ kube_cert_renew_threshold_days | default(30) }}}"
+
+log() { echo "[$(date -Is)] $*"; }
+
+# eligible <crt-file> -> exit 0 when remaining validity is below the threshold.
+eligible() {
+  local crt=$1 enddate epoch now remain_days
+  enddate=$(openssl x509 -in "$crt" -noout -enddate | cut -d= -f2) || return 1
+  epoch=$(date -d "$enddate" +%s) || return 1
+  now=$(date +%s)
+  remain_days=$(( (epoch - now) / 86400 ))
+  if (( remain_days < RENEW_THRESHOLD_DAYS )); then
+    log "eligible: $crt has ${remain_days}d remaining (< ${RENEW_THRESHOLD_DAYS}d threshold)"
+    return 0
+  fi
+  log "not eligible, skipping: $crt has ${remain_days}d remaining (>= ${RENEW_THRESHOLD_DAYS}d threshold)"
+  return 1
+}
+
+# request <label> <keytab> <keyfile> <dest-crt> <principal> <profile> <subject> [extra openssl req args] [kinit principal]
+# The kinit principal defaults to the host principal (the usual case); the admin cert is
+# requested from a user keytab whose only entry is the kubeclusteradm principal.
+request() {
+  local label=$1 keytab=$2 keyfile=$3 dest_crt=$4 principal=$5 profile=$6 subject=$7 extra=${8:-} kinit_principal=${9:-"host/$HOSTNAME"}
+  log "=== $label: requesting certificate for $principal (profile $profile) ==="
+  kinit -kt "$keytab" "$kinit_principal"
+  local csr="/tmp/kube-cert-renew-$label.csr"
+  # shellcheck disable=SC2086
+  openssl req -new -key "$keyfile" -subj "$subject" $extra \
+    -out "$csr"
+  ipa cert-request --ca=kubernetes-ca --principal="$principal" \
+    --profile-id="$profile" --certificate-out="/tmp/kube-cert-renew-$label.crt" "$csr"
+  mv "/tmp/kube-cert-renew-$label.crt" "$dest_crt"
+  rm -f "$csr"
+  log "=== $label: renewed, installed at $dest_crt ==="
+}
+
+{% if kube_masters_group in group_names %}
+# --- control-plane certs (master host keytab) ---
+CP_RENEWED=0
+if eligible "$PKI_DIR/apiserver.crt"; then
+  request apiserver /etc/krb5.keytab "$PKI_DIR/apiserver.key" \
+    "$PKI_DIR/apiserver.crt" "HTTP/$HOSTNAME" kubeAdministrators \
+    "/C=GB/O=$DOMAIN/CN=$HOSTNAME" \
+    "-addext subjectAltName=DNS:$HOSTNAME,DNS:kubernetes-svc.$DOMAIN,DNS:kubernetes-master.$DOMAIN,IP:$SERVICE_IP,IP:$MASTER_IP -addext keyUsage=digitalSignature,keyEncipherment -addext extendedKeyUsage=serverAuth"
+  CP_RENEWED=1
+fi
+if eligible "$PKI_DIR/front-proxy-client.crt"; then
+  request frontproxy /etc/krb5.keytab "$PKI_DIR/front-proxy-client.key" \
+    "$PKI_DIR/front-proxy-client.crt" "host/$HOSTNAME" kubeAdministrators \
+    "/C=GB/O=$DOMAIN/CN=$HOSTNAME" \
+    "-addext keyUsage=digitalSignature,keyEncipherment -addext extendedKeyUsage=clientAuth"
+  CP_RENEWED=1
+fi
+
+# --- cluster-admin client certificate (kubeclusteradm user keytab) ---
+if eligible "$CRED_DIR/kubeadm.crt"; then
+  request admin "$CRED_DIR/kubeclusteradm.keytab" "$CRED_DIR/kubeadm.pem" \
+    "$CRED_DIR/kubeadm.crt" "kubeclusteradm" kubeAdministrators \
+    "/C=GB/O=clusterAdministrators/CN=kubeclusteradm" "" kubeclusteradm
+  # admin.conf embeds the client certificate as base64; re-embed the renewed cert.
+  kubectl config set-credentials kubernetes-admin \
+    --client-key="$CRED_DIR/kubeadm.pem" \
+    --client-certificate="$CRED_DIR/kubeadm.crt" \
+    --kubeconfig=/etc/kubernetes/admin.conf
+  log "=== admin: re-embedded renewed certificate into /etc/kubernetes/admin.conf ==="
+fi
+
+# --- restart the kube-apiserver static pod so it loads any renewed control-plane cert ---
+if [[ $CP_RENEWED -eq 1 ]]; then
+  log "=== restarting kube-apiserver static pod to load renewed certs ==="
+  MANIFEST=/etc/kubernetes/manifests/kube-apiserver.yaml
+  mv "$MANIFEST" "${MANIFEST}.renewing"
+  # wait for the static pod to terminate (up to ~30s) before re-adding the manifest
+  for _ in $(seq 1 30); do
+    crictl ps --name kube-apiserver -q | grep -qv . || break
+    sleep 1
+  done
+  mv "${MANIFEST}.renewing" "$MANIFEST"
+  log "=== kube-apiserver static pod restarted ==="
+fi
+{% else %}
+# --- node client certificate (host keytab; profile adds the system:node: prefix) ---
+if eligible "$PKI_DIR/node-client.crt"; then
+  request nodeclient /etc/krb5.keytab "$PKI_DIR/node-client.key" \
+    "$PKI_DIR/node-client.crt" "host/$HOSTNAME" kubernetesNodes \
+    "/C=GB/O=system:nodes/CN=$HOSTNAME" \
+    "-addext keyUsage=digitalSignature,keyEncipherment -addext extendedKeyUsage=clientAuth"
+  # kubelet does not hot-reload its client certificate; restart it to pick up the new cert.
+  systemctl restart kubelet
+  log "=== nodeclient: restarted kubelet ==="
+fi
+{% endif %}
+
+log "=== renewal tick complete ==="

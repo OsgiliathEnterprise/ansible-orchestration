@@ -310,3 +310,89 @@
   changed_when: >-
     not ipa_certprofile_kubeadm_exists.stdout == '1'
   become: true
+
+# --- kubernetesNodes profile (worker-node client certificates) ---
+# Mirrors the kubeAdministrators profile but forces O=system:nodes AND adds the
+# system:node: CN prefix, so a worker's per-node cert authenticates as
+# system:node:<hostname> in group system:nodes. The CSR only carries the bare
+# hostname (matching the host principal for IPA's host check); this template adds
+# the prefix. Node client certs carry no IP SANs, so none of the apiserver IP-SAN
+# reachability handling (hosts entries / DNS zones) is needed here.
+
+- name: Ipa-kubernetes-ca | check if kubernetesNodes cert profile exists
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-find | grep -c ': kubernetesNodes'
+  register: ipa_certprofile_kubenodes_exists
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Ipa-kubernetes-ca | get the ipa default ca profile for node certs
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-show --out /tmp/ipa_node_ca_profile.cfg caIPAserviceCert
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubenodes_exists.stdout == '1'
+  become: true
+
+- name: Ipa-kubernetes-ca | set the node profile id
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_node_ca_profile.cfg
+    regexp: '^profileId='
+    line: profileId=kubernetesNodes
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubenodes_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | set the node profile visible
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_node_ca_profile.cfg
+    regexp: '^visible='
+    line: visible=true
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubenodes_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | force node cert subject to system:node:<cn>, O=system:nodes
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_node_ca_profile.cfg
+    regexp: "{{ 'policyset.serverCertSet.1.default.params.name' | regex_escape() }}.*"
+    line: policyset.serverCertSet.1.default.params.name=CN=system:node:$request.req_subject_name.cn$, O=system:nodes
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubenodes_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | import the kubernetes node profile
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-import kubernetesNodes --file /tmp/ipa_node_ca_profile.cfg --desc "Kubernetes worker-node client certificates" --store TRUE
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubenodes_exists.stdout == '1'
+  become: true
+
+- name: Ipa-kubernetes-ca | link kubernetesNodes profile to ca-acl
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa caacl-add-profile kubernetes-ca-acl --certprofile kubernetesNodes
+  when:
+    - not ipa_certprofile_kubenodes_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: false

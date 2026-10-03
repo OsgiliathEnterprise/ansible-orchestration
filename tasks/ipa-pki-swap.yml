@@ -1,16 +1,7 @@
 ---
 
-- name: Ipa-pki-swap | patch kubeconfigs to use IPA CA cert
-  ansible.builtin.replace:
-    path: "{{ item }}"
-    regexp: '^(\s*)certificate-authority-data:.*'
-    replace: '\1certificate-authority: /etc/kubernetes/pki/ca.crt'
-  loop:
-    - /etc/kubernetes/controller-manager.conf
-    - /etc/kubernetes/scheduler.conf
-    - /etc/kubernetes/kubelet.conf
-    - /etc/kubernetes/admin.conf
-  become: true
+# Kubeconfigs were already re-pointed at the IPA CA in ipa-certs.yml (before the static pod
+# restarts); only URL/readability fixes remain here.
 
 - name: Ipa-pki-swap | ensure kubeconfig files are readable for testinfra
   ansible.builtin.file:
@@ -44,14 +35,10 @@
     replace: 'server: https://{{ orchestration_host_hostname }}:6443'
   become: true
 
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart API server static pod to pick up new cert
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-apiserver.yaml
-    state: touch
-  become: true
+# The API server hot-reloads its serving cert (no static pod restart needed); the manifest
+# edits in ipa-certs.yml already restarted KCM/scheduler with the patched kubeconfigs.
 
-- name: Ipa-pki-swap | wait for API server to restart
+- name: Ipa-pki-swap | wait for API server to be healthy
   ansible.builtin.uri:
     url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
     validate_certs: no
@@ -61,20 +48,6 @@
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
   until: api_healthz.status == 200
-
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart controller-manager static pod
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
-    state: touch
-  become: true
-
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart scheduler static pod
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-scheduler.yaml
-    state: touch
-  become: true
 
 - name: Ipa-pki-swap | wait for cluster to stabilize after CA swap
   ansible.builtin.uri:
@@ -87,15 +60,37 @@
   delay: "{{ kubernetes_api_ready_delay }}"
   until: cluster_healthz.status == 200
 
-- name: Ipa-pki-swap | wait for controller manager to be ready
+# Functional gate, not just container Ready: a KCM that cannot verify the API cert (stale CA
+# trust) reports Ready=True yet never renews its leader lease. A fresh lease proves it can
+# actually talk to the API; otherwise fail loudly instead of converging green with dead controllers.
+- name: Ipa-pki-swap | wait for controller manager to hold a fresh leader lease
   # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
-  ansible.builtin.shell: kubectl --kubeconfig /etc/kubernetes/admin.conf get pod -n kube-system -l component=kube-controller-manager -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+  ansible.builtin.shell: |
+    renew_time=$(kubectl --kubeconfig /etc/kubernetes/admin.conf get lease -n kube-system kube-controller-manager -o jsonpath='{.spec.renewTime}' 2>/dev/null) || renew_time=""
+    if [ -z "$renew_time" ]; then echo "no-lease"; exit 0; fi
+    age=$(( $(date +%s) - $(date -d "$renew_time" +%s) ))
+    if [ "$age" -lt 90 ]; then echo "fresh:$age"; else echo "stale:$age"; fi
   become: true
   changed_when: false
-  register: cm_ready
+  register: cm_lease
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: "'True' in cm_ready.stdout"
+  until: "'fresh' in cm_lease.stdout"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+
+# Symmetric with the KCM lease gate above: a crash-looping scheduler (e.g. broken CA trust in
+# its kubeconfig) leaves every unscheduled pod — CNI DaemonSets included — stuck Pending, so
+# converge must not pass it silently.
+- name: Ipa-pki-swap | wait for scheduler static pod to report Ready
+  # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
+  ansible.builtin.shell: |
+    kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-scheduler -o jsonpath='{.items[0].status.containerStatuses[0].ready}' 2>/dev/null || echo ""
+  become: true
+  changed_when: false
+  register: scheduler_ready
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: scheduler_ready.stdout == 'true'
   delegate_to: "{{ groups[kube_masters_group] | first }}"
 
 - name: Ipa-pki-swap | add API server override block to kubelet config
@@ -120,3 +115,8 @@
   retries: 6
   delay: 10
   until: "'Kubernetes control plane' in kubectl_verify.stdout"
+
+# Data-plane recovery must run last: after the kubelet refresh (above) so a recreated pod
+# mounts the post-swap CA, and after cluster stabilization. No-op when Calico is absent.
+- name: Ipa-pki-swap | recover Calico/Tigera data-plane workloads after CA swap
+  ansible.builtin.include_tasks: calico-ca-recovery.yml

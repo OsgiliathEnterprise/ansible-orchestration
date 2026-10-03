@@ -1,5 +1,20 @@
 """Role testing files using testinfra."""
+import base64
+import os
+import re
+
 testinfra_hosts = ["master.osgiliath.test"]
+
+
+def _worker_hosts():
+    """Derive the worker hosts from molecule's inventory (all kube_node members)."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return []  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    return sorted(
+        ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"]).get_hosts("kube_node")
+    )
 
 
 def test_kubernetes_ca_exists(host):
@@ -92,13 +107,20 @@ def test_tigera_operator_pods_running(host):
         assert int(cmd.stdout) > 0
 
 
-def test_kubectl_get_nodes_equals_two(host):
-    command = r"""
-    kubectl get nodes --no-headers | \
-    wc -l"""
+def test_kubectl_get_nodes_matches_inventory(host):
+    """The cluster contains exactly master plus every worker from molecule's inventory —
+    so adding a platform is a molecule.yml-only change."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    runner = ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"])
+    expected = sorted(runner.get_hosts("kube_master") + runner.get_hosts("kube_node"))
+    command = "kubectl get nodes --no-headers | awk '{print $1}'"
     with host.sudo():
         cmd = host.run(command)
-        assert int(cmd.stdout) == 2
+        actual = sorted(line for line in cmd.stdout.splitlines() if line.strip())
+        assert actual == expected, f"cluster nodes {actual} != inventory hosts {expected}"
 
 
 def test_admin_cert_issuer_is_kubernetes_ca(host):
@@ -108,33 +130,6 @@ def test_admin_cert_issuer_is_kubernetes_ca(host):
             "grep -ic 'kubernetes-ca'"
         )
     assert int(cmd.stdout) > 0
-
-
-def test_pv_has_nfs_volume_source(host):
-    """Wait for PV to exist and be accessible before checking volume source."""
-    import time
-    command = r'''
-    kubectl get pv -o json | python3 -c 'import sys, json; data=json.load(sys.stdin); pvs=[p for p in data["items"] if "artefactrepo" in p["metadata"]["name"]]; print(json.dumps(pvs))'
-    '''
-    with host.sudo():
-        import json
-        pvs = []
-        for _ in range(12):
-            cmd = host.run(command)
-            try:
-                stdout = cmd.stdout.strip()
-                if stdout and stdout != '[]':
-                    pvs = json.loads(stdout)
-                    if len(pvs) > 0:
-                        break
-            except (json.JSONDecodeError, KeyError):
-                pass
-            time.sleep(5)
-        assert len(pvs) > 0, "No PV found with artefactrepo"
-        pv = pvs[0]
-        assert 'nfs' in pv['spec'], "PV should have nfs volume source"
-        assert 'server' in pv['spec']['nfs'], "PV should have nfs.server"
-        assert 'path' in pv['spec']['nfs'], "PV should have nfs.path"
 
 
 def test_admin_cert_signed_by_kubernetes_ca(host):
@@ -168,6 +163,33 @@ def test_kubectl_get_nodes_with_ipa_credentials(host):
     with host.sudo():
         cmd = host.run("kubectl get nodes --no-headers | wc -l")
     assert int(cmd.stdout) >= 1
+
+
+def test_node_ready_via_master_admin_conf(host):
+    """V2 end-state: master's admin.conf (post pki-swap, trusting the IPA CA) sees every
+    worker node as Ready. Proves admin.conf is patched + API up + all nodes registered —
+    the exact path the converge-time verification relies on."""
+    import time
+
+    workers = _worker_hosts()
+    assert workers, "no kube_node hosts found in molecule inventory"
+    command_tmpl = (
+        "kubectl get node {worker} --kubeconfig /etc/kubernetes/admin.conf "
+        "-o jsonpath='{{.status.conditions[?(@.type==\"Ready\")].status}}'"
+    )
+    with host.sudo():
+        statuses = {}
+        for _ in range(24):
+            statuses = {
+                worker: 'True' in host.run(command_tmpl.format(worker=worker)).stdout
+                for worker in workers
+            }
+            if all(statuses.values()):
+                break
+            time.sleep(15)
+        assert all(statuses.values()), (
+            f"not all worker nodes Ready via master admin.conf (got {statuses!r})"
+        )
 
 
 # IPA PKI bootstrap tests
@@ -246,10 +268,17 @@ def test_controller_manager_conf_references_ipa_ca(host):
     assert "certificate-authority: /etc/kubernetes/pki/ca.crt" in cfg.content.decode()
 
 
-def test_scheduler_conf_references_ipa_ca(host):
+def test_scheduler_conf_embeds_ipa_ca(host):
+    # The scheduler's static pod does not mount /etc/kubernetes/pki, so a file reference to
+    # ca.crt would crash it at boot ("unable to read certificate-authority"); its kubeconfig
+    # must carry the IPA CA embedded instead.
     cfg = host.file("/etc/kubernetes/scheduler.conf")
     assert cfg.exists
-    assert "certificate-authority: /etc/kubernetes/pki/ca.crt" in cfg.content.decode()
+    match = re.search(r"certificate-authority-data:\s*(\S+)", cfg.content.decode())
+    assert match, "scheduler.conf must embed certificate-authority-data (static pod lacks pki mount)"
+    embedded = base64.b64decode(match.group(1)).decode().strip()
+    ca_crt = host.file("/etc/kubernetes/pki/ca.crt").content.decode().strip()
+    assert embedded == ca_crt, "embedded CA must match /etc/kubernetes/pki/ca.crt (IPA CA)"
 
 
 def test_kubeadm_init_succeeded_clean_pki(host):
@@ -265,6 +294,112 @@ def test_api_server_static_pod_running_after_swap(host):
             "grep -c kube-apiserver"
         )
     assert int(cmd.stdout) > 0
+
+
+# Unattended certificate renewal tests
+
+def test_cert_renewal_script_installed(host):
+    f = host.file("/usr/local/sbin/kube-cert-renew.sh")
+    assert f.exists
+    assert f.is_file
+
+
+def test_cert_renewal_timer_enabled_and_active(host):
+    with host.sudo():
+        enabled = host.run("systemctl is-enabled kube-cert-renew.timer").stdout
+        active = host.run("systemctl is-active kube-cert-renew.timer").stdout
+    assert 'enabled' in enabled
+    assert 'active' in active
+
+
+def test_kubeclusteradm_keytab_installed(host):
+    """The user keytab used to renew the cluster-admin client certificate without a password."""
+    with host.sudo():
+        f = host.file("/home/kubecreds/kubeclusteradm.keytab")
+        assert f.exists
+        cmd = host.run("klist -kt /home/kubecreds/kubeclusteradm.keytab | grep -c kubeclusteradm")
+    assert int(cmd.stdout) > 0
+
+
+def test_master_host_in_it_specialist_role(host):
+    """Write access on the apiserver SAN principals comes from this role grant.
+
+    `ipa role-show` without --all does not list members; --all is required to see
+    the `Member hosts:` attribute (same as caacl-show in test_ca_acl_grants_all_kube_hosts).
+
+    The grep pattern must use double quotes: testinfra wraps the whole command in
+    another single-quoted layer for `sudo /bin/sh -c`, so single-quoted
+    `'$(hostname)'` would reach the inner shell unexpanded and match literally."""
+    with host.sudo():
+        cmd = host.run(
+            "echo '123ADMin' | kinit admin > /dev/null 2>&1 && "
+            "ipa role-show --all 'IT Specialist' | grep -c \"Member hosts:.*$(hostname)\""
+        )
+    assert int(cmd.stdout) > 0
+
+
+def test_ca_acl_grants_all_kube_hosts(host):
+    """Spec scenario 'CA ACL permits each principal type': after convergence the CA ACL grants
+    every kube host — renewal authenticates as the host principal, which `user category: all`
+    does not cover (without these grants forced renewal is denied by the ACL)."""
+    if "MOLECULE_INVENTORY_FILE" not in os.environ:
+        return  # conftest skips the run when outside molecule
+    from testinfra.utils import ansible_runner
+
+    runner = ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"])
+    expected = sorted(runner.get_hosts("kube_master") + runner.get_hosts("kube_node"))
+    with host.sudo():
+        cmd = host.run(
+            "echo '123ADMin' | kinit admin > /dev/null 2>&1 && "
+            "ipa caacl-show kubernetes-ca-acl --all"
+        )
+    # `ipa caacl-show --all` lists granted hosts under a `Hosts:` attribute (not "Member hosts:").
+    member_lines = [line for line in cmd.stdout.splitlines() if "Hosts:" in line]
+    members_blob = " ".join(member_lines)
+    missing = [h for h in expected if h not in members_blob]
+    assert not missing, f"kubernetes-ca-acl is missing host grants: {missing}"
+
+
+def test_cert_renewal_noop_tick_does_not_churn(host):
+    """A tick with nothing eligible must not rewrite certs or restart services (no-churn)."""
+    serial_cmd = "openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -serial"
+    enter_cmd = "systemctl show kubelet -p ActiveEnterTimestamp"
+    with host.sudo():
+        serial_before = host.run(serial_cmd).stdout
+        enter_before = host.run(enter_cmd).stdout
+        cmd = host.run("RENEW_THRESHOLD_DAYS=1 /usr/local/sbin/kube-cert-renew.sh")
+        assert cmd.rc == 0, f"renewal script failed: {cmd.stderr}"
+        serial_after = host.run(serial_cmd).stdout
+        enter_after = host.run(enter_cmd).stdout
+    assert serial_before == serial_after, "no-op tick must not rewrite the apiserver cert"
+    assert enter_before == enter_after, "no-op tick must not restart services"
+
+
+def test_pv_has_nfs_volume_source(host):
+    """Wait for PV to exist and be accessible before checking volume source."""
+    import time
+    command = r'''
+    kubectl get pv -o json | python3 -c 'import sys, json; data=json.load(sys.stdin); pvs=[p for p in data["items"] if "artefactrepo" in p["metadata"]["name"]]; print(json.dumps(pvs))'
+    '''
+    with host.sudo():
+        import json
+        pvs = []
+        for _ in range(12):
+            cmd = host.run(command)
+            try:
+                stdout = cmd.stdout.strip()
+                if stdout and stdout != '[]':
+                    pvs = json.loads(stdout)
+                    if len(pvs) > 0:
+                        break
+            except (json.JSONDecodeError, KeyError):
+                pass
+            time.sleep(5)
+        assert len(pvs) > 0, "No PV found with artefactrepo"
+        pv = pvs[0]
+        assert 'nfs' in pv['spec'], "PV should have nfs volume source"
+        assert 'server' in pv['spec']['nfs'], "PV should have nfs.server"
+        assert 'path' in pv['spec']['nfs'], "PV should have nfs.path"
 
 
 def test_volume_is_create(host):

@@ -1,0 +1,45 @@
+---
+
+# Data-plane recovery after the IPA PKI swap.
+# The swap replaces /etc/kubernetes/pki/ca.crt and restarts control-plane static pods, but
+# pre-existing Calico/Tigera workloads keep their stale in-cluster ca.crt (kubelet materializes
+# that file at pod-creation time). A rolling restart of the calico-node DaemonSet replaces each
+# node's pod so kubelet re-materialises the post-swap CA and CNI initialises, bringing worker
+# nodes back to Ready. Runs on the master (inherited from ipa-pki-swap.yml); no-op when Calico is
+# not installed. Deliberately avoids recreating the operator: that forces an image re-pull (fragile
+# on flaky registry access) and destabilises a healthy control plane.
+
+- name: Calico-ca-recovery | detect calico-node DaemonSet (no-op if Calico absent)
+  # Shell kept as a documented exception: no native module probes for a specific DaemonSet by name
+  ansible.builtin.shell: kubectl --kubeconfig /etc/kubernetes/admin.conf get ds -n calico-system calico-node -o jsonpath='{.metadata.name}' 2>/dev/null || true
+  become: true
+  changed_when: false
+  failed_when: false
+  register: calico_node_ds
+
+- name: Calico-ca-recovery | rolling restart calico-node to re-materialise post-swap CA
+  # Rolling (not mass-delete) so each node's CNI stays up while its pod is replaced one at a time.
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf -n calico-system rollout restart daemonset/calico-node
+  become: true
+  changed_when: true
+  when: calico_node_ds.stdout | default('') | length > 0
+
+- name: Calico-ca-recovery | wait for a Ready calico-node on every node
+  # Shell kept as a documented exception: no native module checks per-node pod coverage cluster-wide.
+  # The node name is matched in any field (not a fixed column) because `get pods -o wide` appends a
+  # trailing READINESS GATES column, so the NODE column index shifts across kubectl versions; the
+  # node FQDN appears exactly once per pod line and cannot collide with an IP or `<none>`.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | while read -r node; do
+      [ -z "$node" ] && continue
+      ready=$(kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n calico-system -o wide --no-headers 2>/dev/null | awk -v n="$node" '$1 ~ /^calico-node-/ {for(i=3;i<=NF;i++) if($i==n){split($2,r,"/"); if (r[1]>0 && r[1]==r[2]) c++}} END{print c+0}')
+      [ "${ready:-0}" -ge 1 ] || echo "NOT_READY:$node"
+    done
+  become: true
+  changed_when: false
+  register: calico_node_coverage
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: "'NOT_READY:' not in (calico_node_coverage.stdout | default(''))"
+  when: calico_node_ds.stdout | default('') | length > 0
