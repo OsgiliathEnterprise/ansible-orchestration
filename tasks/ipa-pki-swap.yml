@@ -35,30 +35,21 @@
     replace: 'server: https://{{ orchestration_host_hostname }}:6443'
   become: true
 
-# The API server hot-reloads its serving cert (no static pod restart needed); the manifest
-# edits in ipa-certs.yml already restarted KCM/scheduler with the patched kubeconfigs.
-
-- name: Ipa-pki-swap | wait for API server to be healthy
+# pki-swap only patches kubeconfigs, server URLs and file readability — it never touches the
+# serving certificate, so no restart is implied here. This single validated gate confirms the API
+# is healthy and presents the IPA-CA-anchored serving cert; stabilization semantics are carried
+# by the functional gates below (KCM lease freshness, scheduler Ready).
+- name: Ipa-pki-swap | wait for API server to be healthy with post-swap certificate (validated)
   ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
+    url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
+    ca_certificate: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true
   register: api_healthz
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: api_healthz.status == 200
-
-- name: Ipa-pki-swap | wait for cluster to stabilize after CA swap
-  ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
-    status_code: 200
-  become: true
-  register: cluster_healthz
-  retries: "{{ kubernetes_api_ready_retries }}"
-  delay: "{{ kubernetes_api_ready_delay }}"
-  until: cluster_healthz.status == 200
+  # uri's `until` only retries when status == 200; on a TLS verification failure (stale CA, cert not yet swapped) the module returns status null and fails immediately without retrying — the guard makes this gate wait for reachability AND trust.
+  until: api_healthz is not skipped and api_healthz.status | default(0) == 200
 
 # Functional gate, not just container Ready: a KCM that cannot verify the API cert (stale CA
 # trust) reports Ready=True yet never renews its leader lease. A fresh lease proves it can
@@ -126,7 +117,7 @@
   become: true
   register: kubectl_verify
   retries: 6
-  delay: 10
+  delay: "{{ kubernetes_api_ready_delay }}"
   until: (kubectl_verify.version | default({})) | length > 0
 
 # Data-plane recovery must run last: after the kubelet refresh (above) so a recreated pod

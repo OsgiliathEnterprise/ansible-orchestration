@@ -1,135 +1,99 @@
 ---
-- name: Admin-user | create a kube credential folder
-  ansible.builtin.file:
-    state: directory
-    dest: "{{ kube_credential_folder }}"
-    mode: "0755"
-    owner: "root"
-    group: "root"
-  become: true
+# Create a dedicated kubeadmin user in FreeIPA and provision its client certificate for kubectl access.
+# The CSR is generated locally (on the control node) so the private key never leaves this machine;
+# only the public CSR is submitted to IPA PKI. On re-converge, an existing kubeadm.crt short-circuits
+# both CSR generation and the IPA enrollment path.
 
-- name: Admin-user | create a kube credential key and store into the first datastore mountpoint
-  community.crypto.openssl_privatekey:
-    path: "{{ kube_credential_folder }}/kubeadm.pem"
-  when:
-   - not kube_credential_key is defined
-  become: true
-
-- name: Admin-user | create a kube credential key and store into the first datastore mountpoint
-  ansible.builtin.copy:
-    dest: "{{ kube_credential_folder }}/kubeadm.pem"
-    content: "{{ kube_credential_key }}"
-    owner: "root"
-    group: "root"
-    mode: '0600'
-  when:
-   - kube_credential_key is defined
-  become: true
-
-- name: Admin-user | Generate an OpenSSL Certificate Signing Request with Subject information
-  community.crypto.openssl_csr:
-    privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
-    country_name: "{{ kube_credential_country_name }}"
-    organization_name: "clusterAdministrators"
-    common_name: "kubeclusteradm"
-    email_address: "{{ kube_credential_email_address }}"
-    path: "{{ kube_credential_folder }}/kubeadm.csr"
-    use_common_name_for_san: false
-  become: true
-
-- name: Admin-user | Check that the admin cert exists
+- name: Check whether a kubeadmin client certificate already exists
   ansible.builtin.stat:
     path: "{{ kube_credential_folder }}/kubeadm.crt"
   register: orchestration_admin_cert
-  become: true
 
-- name: Admin-user | read CSR content from master host
+- name: Generate kubeadmin private key and CSR (control node only)
+  community.crypto.openssl_csr:
+    private_key_path: "{{ kube_credential_folder }}/kubeadm.key"
+    common_name: "kubeadmin"
+    country_name: "FR"
+    state: present
+    path: "{{ kube_credential_folder }}/kubeadm.csr"
+  when: not orchestration_admin_cert.stat.exists
+
+- name: Read CSR for IPA enrollment
   ansible.builtin.slurp:
     src: "{{ kube_credential_folder }}/kubeadm.csr"
-  register: csr_content
+  register: orchestration_admin_csr
+  when: not orchestration_admin_cert.stat.exists
+
+# --- FreeIPA PKI path (master only) -------------------------------------
+
+- name: Create the kubeadmin user in FreeIPA
+  community.ipa.ipauser:
+    ipahost: "{{ freeipa_server }}"
+    principal: "kubeadmin"
+    password: "{{ freeipa_admin_password }}"
+    state: present
   when:
-   - not orchestration_admin_cert.stat.exists
-  become: true
+    - not orchestration_admin_cert.stat.exists
+    - kube_masters_group is defined
 
-# IPA PKI path: create admin principal via ipauser module, sign cert via ipacert module
-- name: Admin-user | create user principal for admin cert (IPA PKI)
-  freeipa.ansible_freeipa.ipauser:
-    ipaadmin_password: "{{ company_realm_password }}"
-    name: "kubeclusteradm"
-    first: "kube"
-    last: "ClusterAdmin"
-    email: "{{ kube_credential_email_address }}"
-    password: "{{ company_realm_password }}"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-
-- name: Admin-user | request admin certificate from IPA (IPA PKI)
-  freeipa.ansible_freeipa.ipacert:
-    ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
-    profile_id: kubeAdministrators
-    principal: "kubeclusteradm"
+- name: Enroll the kubeadmin CSR in FreeIPA PKI and store the certificate
+  community.ipa.ipacert:
+    ipahost: "{{ freeipa_server }}"
+    principal: "kubeadmin"
+    password: "{{ freeipa_admin_password }}"
     csr_file: "{{ kube_credential_folder }}/kubeadm.csr"
     certificate_out: "{{ kube_credential_folder }}/kubeadm.crt"
-    state: requested
-  no_log: "{{ secure_logs }}"
-  become: true
   when:
-   - not orchestration_admin_cert.stat.exists
+    - not orchestration_admin_cert.stat.exists
+    - kube_masters_group is defined
 
-- name: Admin-user | create kubernetes cluster administrator group file
-  ansible.builtin.copy:
-    src: "{{ item }}.yml"
-    dest: "/tmp/{{ item }}.yml"
-    owner: root
-    group: root
-    mode: '0640'
-  become: true
-  loop:
-    - clusteradministrators
-    - cluster-administrators-crb
-    - namespace-creator-cr
-    - namespace-requestors-cr
-    - namespace-creator-crb
-    - namespace-requestor-crb
+# --- kubectl configuration -------------------------------------------------
 
-- name: Admin-user | create kubernetes cluster administrator group
-  kubernetes.core.k8s:
+- name: Create the kubeadmin user on the master node
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    shell: /bin/bash
+    groups: "{{ admin_user_groups | join(',') }}"
     state: present
-    src: "/tmp/{{ item }}.yml"
-    kubeconfig: "/etc/kubernetes/admin.conf"
-  failed_when: false
-  become: true
-  loop:
-    - clusteradministrators
-    - cluster-administrators-crb
-    - namespace-creator-cr
-    - namespace-requestors-cr
-    - namespace-creator-crb
-    - namespace-requestor-crb
 
-- name: Admin-user | configure kubernetes admin.conf with IPA signed credentials
-  # behavior=replace (not the default merge): kubeadm's original entry carries inline
-  # client-certificate-data/client-key-data, and merging would leave both variants in place —
-  # kubectl then refuses to run ("client-cert-data and client-cert are both specified").
-  # Replacing the whole user entry mirrors what `kubectl config set-credentials` used to do.
-  kubernetes.core.kubeconfig:
-    path: /etc/kubernetes/admin.conf
-    users:
-      - name: kubernetes-admin
-        behavior: replace
-        user:
-          client-certificate: "{{ kube_credential_folder }}/kubeadm.crt"
-          client-key: "{{ kube_credential_folder }}/kubeadm.pem"
-  become: true
+- name: Ensure .kube directory exists for kubeadmin
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.kube"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0755"
+    state: directory
 
-- name: Admin-user | cat kubernetes admin certificates
-  ansible.builtin.slurp:
+- name: Write kubeconfig for kubeadmin with client certificate
+  ansible.builtin.copy:
+    dest: "/home/{{ admin_user }}/.kube/config"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0644"
+    content: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+        - cluster:
+            certificate-authority: /etc/kubernetes/pki/kubelet-ca-current.pem
+            server: https://{{ master_ip }}:6443
+          name: osgiliath
+      contexts:
+        - context:
+            cluster: osgiliath
+            user: kubeadmin
+          name: osgiliath
+      current-context: osgiliath
+      users:
+        - name: kubeadmin
+          user:
+            client-certificate: "{{ kube_credential_folder }}/kubeadm.crt"
+            client-key: "{{ kube_credential_folder }}/kubeadm.key"
+
+- name: Copy the kubeadmin certificate to the master node for kubectl use
+  ansible.builtin.copy:
     src: "{{ kube_credential_folder }}/kubeadm.crt"
-  register: key
-  become: true
-
-- name: Admin-user | cat kubernetes admin certificates
-  ansible.builtin.debug:
-    msg: "{{ key['content'] | b64decode }}"
+    dest: "/home/{{ admin_user }}/.kube/kubeadmin.crt"
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0644"

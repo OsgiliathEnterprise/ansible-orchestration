@@ -52,6 +52,7 @@ main.yml
 |   |-- kube-apiserver-kubelet-client.yml
 |-- kube-install-join-node.yml    [kube_nodes_group]
 |-- ipa-pki-swap.yml              [kube_masters_group]
+|-- ipa-kube-admin-credential.yml [kube_masters_group; kinit + kubectl config set-credentials]
 |-- kube-firewall.yml             [kube_masters_group or kube_nodes_group]
 |-- admin-user.yml                [kube_masters_group]
 |-- nfs-mountpoints.yml           [kube_masters_group + nfs_mountpoints]

@@ -57,6 +57,11 @@
   when:
     - kube_masters_group in group_names
 
+- name: Create kube admin credential from IPA CA (master)
+  ansible.builtin.include_tasks: ipa-kube-admin-credential.yml
+  when:
+    - kube_masters_group in group_names
+
 - name: Firewalld configuration for kube
   ansible.builtin.include_tasks: kube-firewall.yml
   when:

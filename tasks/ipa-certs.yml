@@ -133,10 +133,12 @@
     replace: '--root-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
   become: true
 
-- name: Ipa-certs | wait for API server to restart after static pod update
+# Old-cert window: the API may legitimately present either the kubeadm-signed or the IPA-signed
+# serving cert here, so anchor to the merged bundle — "any CA this control plane is allowed to trust".
+- name: Ipa-certs | wait for API server to restart after static pod update (validated)
   ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
+    url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
+    ca_certificate: "{{ kubernetes_certificates_path }}ca-bundle.crt"
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"
@@ -190,10 +192,12 @@
     state: touch
   become: true
 
-- name: Ipa-certs | wait for API server to restart with new certificate
+# Anchored to the IPA CA only: a still-stale serving cert must NOT pass — this gate asserts the
+# transition completed, i.e. the running server presents the new certificate.
+- name: Ipa-certs | wait for API server to restart with new certificate (validated)
   ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
+    url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
+    ca_certificate: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"
@@ -222,7 +226,7 @@
   failed_when: false
   register: kubectl_cluster_info
   retries: 3
-  delay: 10
+  delay: "{{ kubernetes_api_ready_delay }}"
   until: (kubectl_cluster_info.version | default({})) | length > 0
 
 - name: Ipa-certs | show API server version from cluster-info check
