@@ -42,7 +42,7 @@
 - name: Ipa-pki-swap | wait for API server to be healthy with post-swap certificate (validated)
   ansible.builtin.uri:
     url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
-    ca_certificate: "{{ kubernetes_certificates_path }}ca.crt"
+    ca_path: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true
   register: api_healthz

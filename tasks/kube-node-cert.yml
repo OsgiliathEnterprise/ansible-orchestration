@@ -1,5 +1,5 @@
 ---
-# Request this worker node's own client certificate from the kubernetes-ca.
+# Request this worker node's own client certificate from the kubeclusteradm CA (CA #2).
 # The CSR carries CN=<hostname> (matching the host principal so IPA's host-principal
 # hostname check passes); the kubernetesNodes profile template adds the system:node:
 # prefix, so the ISSUED cert is O=system:nodes, CN=system:node:<hostname> and the
@@ -37,10 +37,10 @@
   become: true
   when: not node_client_cert_result.stat.exists
 
-- name: Kube-node-cert | request node client certificate from IPA (on control plane)
+- name: "Kube-node-cert | request node client certificate from the kubeclusteradm CA (CA #2, on control plane)"
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "host/{{ orchestration_host_hostname }}"
     csr_file: "/tmp/node-{{ orchestration_host_hostname }}.csr"
     certificate_out: "/tmp/node-{{ orchestration_host_hostname }}.crt"

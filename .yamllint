@@ -8,6 +8,7 @@ ignore: |
   .github
   .poetry
   .tox
+  .venv
   .travis.yml
 rules:
   braces:

@@ -30,10 +30,10 @@
       - clientAuth
   become: true
 
-- name: Kube-apiserver-kubelet-client | request kubelet client certificate from IPA
+- name: "Kube-apiserver-kubelet-client | request kubelet client certificate from the kubeclusteradm CA (CA #2)"
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "host/{{ orchestration_host_hostname }}"
     csr_file: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
     certificate_out: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"

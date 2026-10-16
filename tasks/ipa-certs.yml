@@ -1,4 +1,18 @@
 ---
+# PKI swap onto the FreeIPA two-CA model:
+#
+#   CA #1 (kubernetes-ca) — the cluster trust anchor: signs the API server
+#   *serving* cert (apiserver.crt) and stays as ca.crt (the kubeconfig
+#   certificate-authority).
+#   CA #2 (kubeclusteradm) — the client CA: signs the front-proxy, kubelet,
+#   node, admin, controller-manager and scheduler client certs (the latter two
+#   re-issued from CA #2 via static-subject profiles; the kubeadm originals are
+#   replaced in-place). Its CA cert is fetched to ca.crt.kubeclusteradm
+#   (provisioned by ipa-kubeclusteradm-ca.yml).
+#   ca-bundle.crt = CA #2 + CA #1 — fed to --client-ca-file / --root-ca-file
+#   so both CA-signed certs validate. The kubeadm CA is retained only as
+#   ca.crt.kubeadm for --cluster-signing-cert-file (CSR-based signing); it is
+#   no longer part of the bundle.
 
 - name: Ipa-certs | kerberos safeguard
   ansible.builtin.command: kinit -kt /etc/krb5.keytab
@@ -26,10 +40,21 @@
 - name: Ipa-certs | delegate kubernetes ca creation to IPA
   ansible.builtin.include_tasks: ipa-kubernetes-ca.yml
 
+- name: "Ipa-certs | delegate kubeclusteradm CA (CA #2) creation to IPA"
+  ansible.builtin.include_tasks: ipa-kubeclusteradm-ca.yml
+
 - name: Ipa-certs | download ca from IPA to temp location
   ansible.builtin.shell: |
     set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt.new
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+  become: true
+
+- name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA"
+  ansible.builtin.shell: |
+    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kubernetes_certificates_path }}ca.crt.kubeclusteradm
   no_log: "{{ secure_logs }}"
   changed_when: false
   become: true
@@ -41,21 +66,26 @@
   become: true
   changed_when: false
 
-- name: Ipa-certs | read kubeadm CA certificate for bundle
+# The client CA bundle (ca-bundle.crt) is the merged kubeclusteradm (CA #2) +
+# kubernetes-ca (CA #1). CA #2 signs the client certs (front-proxy, kubelet, node,
+# admin); CA #1 signs the API server serving cert. The kubeadm CA is no longer part
+# of the bundle — it is kept only as ca.crt.kubeadm for --cluster-signing-cert-file
+# (CSR-based signing) and the CA #1 serving cert.
+- name: "Ipa-certs | read kubeclusteradm CA (CA #2) certificate for bundle"
   ansible.builtin.slurp:
-    src: "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
-  register: ca_bundle_kubeadm
+    src: "{{ kubernetes_certificates_path }}ca.crt.kubeclusteradm"
+  register: ca_bundle_kubeclusteradm
   become: true
 
-- name: Ipa-certs | read IPA CA certificate for bundle
+- name: "Ipa-certs | read kubernetes-ca (CA #1) certificate for bundle"
   ansible.builtin.slurp:
     src: "{{ kubernetes_certificates_path }}ca.crt.new"
   register: ca_bundle_ipa
   become: true
 
-- name: Ipa-certs | create merged CA bundle (kubeadm + IPA) for client auth
+- name: Ipa-certs | create merged CA bundle (kubeclusteradm + kubernetes-ca) for client auth
   ansible.builtin.copy:
-    content: "{{ ca_bundle_kubeadm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
+    content: "{{ ca_bundle_kubeclusteradm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
     dest: "{{ kubernetes_certificates_path }}ca-bundle.crt"
     owner: root
     mode: '0644'
@@ -133,12 +163,27 @@
     replace: '--root-ca-file=/etc/kubernetes/pki/ca-bundle.crt'
   become: true
 
-# Old-cert window: the API may legitimately present either the kubeadm-signed or the IPA-signed
-# serving cert here, so anchor to the merged bundle — "any CA this control plane is allowed to trust".
+# Old-cert window: the API may legitimately present either the kubeadm-signed serving cert
+# (fresh cluster: the IPA-signed one is only created below) or the CA #1-signed one
+# (re-converge). The merged bundle no longer contains the kubeadm CA (D4), so anchor the
+# gate to a file holding all three CAs: kubeadm CA + ca-bundle (CA #2 + CA #1).
+- name: Ipa-certs | read retained kubeadm CA for old-cert window gate anchor
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
+  register: gate_kubeadm_ca
+  become: true
+
+- name: Ipa-certs | build gate anchor (kubeadm CA + merged bundle) for old-cert window
+  ansible.builtin.copy:
+    content: "{{ gate_kubeadm_ca.content | b64decode }}{{ ca_bundle_kubeclusteradm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
+    dest: /tmp/kube-api-gate-anchor.crt
+    mode: '0644'
+  become: true
+
 - name: Ipa-certs | wait for API server to restart after static pod update (validated)
   ansible.builtin.uri:
     url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
-    ca_certificate: "{{ kubernetes_certificates_path }}ca-bundle.crt"
+    ca_path: /tmp/kube-api-gate-anchor.crt
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"
@@ -167,6 +212,9 @@
 
 - name: Ipa-certs | create kubelet client certs
   ansible.builtin.include_tasks: kube-apiserver-kubelet-client.yml
+
+- name: "Ipa-certs | delegate controlplane client certs (controller-manager + scheduler) to IPA"
+  ansible.builtin.include_tasks: ipa-controlplane-clients.yml
 
 - name: Ipa-certs | Check SA key exists
   ansible.builtin.stat:
@@ -197,7 +245,7 @@
 - name: Ipa-certs | wait for API server to restart with new certificate (validated)
   ansible.builtin.uri:
     url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
-    ca_certificate: "{{ kubernetes_certificates_path }}ca.crt"
+    ca_path: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"
@@ -205,11 +253,11 @@
   register: result
   until: result.status == 200
 
-# Shell exception: community.crypto 3.3.0 has no certificate chain validation
+# Command exception: community.crypto 3.3.0 has no certificate chain validation
 # module (x509_certificate_info parses certificate fields only, it cannot verify
 # that apiserver.crt chains to the new CA), so this task stays a shell command.
 - name: Ipa-certs | verify API server cert chain is valid
-  ansible.builtin.shell: |
+  ansible.builtin.command: |
     openssl verify -CAfile /etc/kubernetes/pki/ca.crt /etc/kubernetes/pki/apiserver.crt
   become: true
   changed_when: false

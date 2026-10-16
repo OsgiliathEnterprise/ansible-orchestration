@@ -396,3 +396,147 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   changed_when: false
+
+# --- kubeControllerManager / kubeScheduler profiles (control-plane client certs) ---
+# Static-subject profiles: the CSR carries the master's hostname (to pass IPA's
+# host-principal check for the host/<master> request principal), and the profile
+# rewrites the issued subject to the exact system:masters identity the cluster RBAC
+# expects (D3a). The subject is fully static (no $request variables), unlike the
+# kubernetesNodes prefixing pattern. No IP SANs, so none of the apiserver IP-SAN
+# reachability handling is needed.
+
+- name: Ipa-kubernetes-ca | check if kubeControllerManager cert profile exists
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-find | grep -c ': kubeControllerManager'
+  register: ipa_certprofile_kubecm_exists
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Ipa-kubernetes-ca | get the ipa default ca profile for controller-manager cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-show --out /tmp/ipa_cm_ca_profile.cfg caIPAserviceCert
+  when:
+    - not ipa_certprofile_kubecm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubecm_exists.stdout == '1'
+  become: true
+
+- name: Ipa-kubernetes-ca | set the controller-manager profile id
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_cm_ca_profile.cfg
+    regexp: '^profileId='
+    line: profileId=kubeControllerManager
+  when:
+    - not ipa_certprofile_kubecm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubecm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | set the controller-manager profile visible
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_cm_ca_profile.cfg
+    regexp: '^visible='
+    line: visible=true
+  when:
+    - not ipa_certprofile_kubecm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubecm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | force controller-manager cert subject to static system:masters identity
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_cm_ca_profile.cfg
+    regexp: "{{ 'policyset.serverCertSet.1.default.params.name' | regex_escape() }}.*"
+    line: "policyset.serverCertSet.1.default.params.name=CN=system:kube-controller-manager, O=system:masters"
+  when:
+    - not ipa_certprofile_kubecm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubecm_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | import the controller-manager profile
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-import kubeControllerManager --file /tmp/ipa_cm_ca_profile.cfg --desc "Kubernetes controller-manager client certificate" --store TRUE
+  when:
+    - not ipa_certprofile_kubecm_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubecm_exists.stdout == '1'
+  become: true
+
+- name: Ipa-kubernetes-ca | check if kubeScheduler cert profile exists
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-find | grep -c ': kubeScheduler'
+  register: ipa_certprofile_kubescheduler_exists
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Ipa-kubernetes-ca | get the ipa default ca profile for scheduler cert
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-show --out /tmp/ipa_scheduler_ca_profile.cfg caIPAserviceCert
+  when:
+    - not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  become: true
+
+- name: Ipa-kubernetes-ca | set the scheduler profile id
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_scheduler_ca_profile.cfg
+    regexp: '^profileId='
+    line: profileId=kubeScheduler
+  when:
+    - not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubescheduler_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | set the scheduler profile visible
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_scheduler_ca_profile.cfg
+    regexp: '^visible='
+    line: visible=true
+  when:
+    - not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubescheduler_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | force scheduler cert subject to static system:masters identity
+  ansible.builtin.lineinfile:
+    path: /tmp/ipa_scheduler_ca_profile.cfg
+    regexp: "{{ 'policyset.serverCertSet.1.default.params.name' | regex_escape() }}.*"
+    line: "policyset.serverCertSet.1.default.params.name=CN=system:kube-scheduler, O=system:masters"
+  when:
+    - not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  changed_when: not ipa_certprofile_kubescheduler_exists.stdout == '1'
+
+- name: Ipa-kubernetes-ca | import the scheduler profile
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa certprofile-import kubeScheduler --file /tmp/ipa_scheduler_ca_profile.cfg --desc "Kubernetes scheduler client certificate" --store TRUE
+  when:
+    - not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: >-
+    not ipa_certprofile_kubescheduler_exists.stdout == '1'
+  become: true

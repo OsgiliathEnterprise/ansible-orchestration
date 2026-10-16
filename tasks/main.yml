@@ -52,13 +52,24 @@
   when:
     - kube_nodes_group in group_names
 
-- name: Patch kube configs to use IPA CA
-  ansible.builtin.include_tasks: ipa-pki-swap.yml
+# The admin credential (IPA user + kinit) and the CA #2 admin client cert
+# (admin-user.yml) must exist BEFORE ipa-pki-swap.yml: the pki-swap verification
+# gates (KCM lease, scheduler Ready, kubectl) authenticate with admin.conf, whose
+# client cert must be the CA #2-issued one to be trusted by the 2-CA bundle (the
+# kubeadm CA was dropped from it). The kubectl get nodes verification therefore runs
+# at the end of admin-user.yml, after admin.conf is re-embedded with the CA #2 cert.
+- name: Create kube admin credential from IPA CA (master)
+  ansible.builtin.include_tasks: ipa-kube-admin-credential.yml
   when:
     - kube_masters_group in group_names
 
-- name: Create kube admin credential from IPA CA (master)
-  ansible.builtin.include_tasks: ipa-kube-admin-credential.yml
+- name: Create admin user (CA #2 cert + admin.conf re-embed, before pki-swap gate)
+  ansible.builtin.import_tasks: admin-user.yml
+  when:
+    - kube_masters_group in group_names
+
+- name: Patch kube configs to use IPA CA
+  ansible.builtin.include_tasks: ipa-pki-swap.yml
   when:
     - kube_masters_group in group_names
 
@@ -66,11 +77,6 @@
   ansible.builtin.include_tasks: kube-firewall.yml
   when:
     - kube_masters_group in group_names or kube_nodes_group in group_names
-
-- name: Create admin user
-  ansible.builtin.import_tasks: admin-user.yml
-  when:
-    - kube_masters_group in group_names
 
 - name: Install unattended certificate renewal timers
   ansible.builtin.include_tasks: ipa-cert-renewal.yml

@@ -6,6 +6,9 @@
 #      node's IPA-derived trust anchor (design D2), and
 #   2. the kubernetes-ca + kubernetesNodes profile exist in FreeIPA (design D3) — the
 #      profile gate runs ahead of the CA fetch, so the anchor is installed before the gate.
+# `kubeadm reset` must run after the validated gate (a trust mismatch fails fast before
+# any node-local mutation), but it wipes /etc/kubernetes/pki/ — including ca.crt — so
+# the anchor is reinstalled from the already-verified fetch immediately afterwards.
 
 - name: Kube-install-join | check if node already joined
   ansible.builtin.stat:
@@ -94,7 +97,7 @@
     - name: Kube-install-join | wait for API server readiness (validated)
       ansible.builtin.uri:
         url: "https://{{ orchestration_master_ip }}:6443/healthz"
-        ca_certificate: /etc/kubernetes/pki/ca.crt
+        ca_path: /etc/kubernetes/pki/ca.crt
         status_code: 200
       become: true
       retries: "{{ orchestration_readiness_retries }}"
@@ -160,6 +163,24 @@
         kubeadm reset -f 2>/dev/null || true
       become: true
       changed_when: false
+
+    # `kubeadm reset` wipes /etc/kubernetes/pki/ (including ca.crt), so the trust anchor
+    # must be reinstalled before kubelet starts — otherwise it crash-loops on a missing
+    # certificate-authority. The content is the same already-verified fresh fetch, so no
+    # re-comparison gate is needed.
+    - name: Kube-install-join | recreate pki directory wiped by kubeadm reset
+      ansible.builtin.file:
+        path: /etc/kubernetes/pki
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Kube-install-join | reinstall CA cert wiped by kubeadm reset
+      ansible.builtin.copy:
+        content: "{{ kube_ca_crt.content | b64decode }}"
+        dest: /etc/kubernetes/pki/ca.crt
+        mode: '0644'
+      become: true
 
     - name: Kube-install-join | remove stale kubelet artifacts
       ansible.builtin.file:

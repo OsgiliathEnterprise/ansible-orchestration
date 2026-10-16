@@ -4,9 +4,23 @@ kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'internal'
 kube_firewall_trusted_zone: "trusted"
 kube_credential_country_name: "FR"
-kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
-kube_credential_cn: "Kubernetes administration credential"
+# RSA key size for the cluster-admin client key (4096: the key is long-lived,
+# renewed annually by the ipa-cert-renewal timer)
+kube_credential_key_bits: 4096
+# Folder holding the cluster-admin key/CSR/cert (and renewal keytab); matches tcharl.ansible_iam
+kube_credential_folder: "/home/kubecreds"
+# IPA principal for the cluster-admin user (keytab + cert enrollment)
+ipa_kube_admin_principal: "kubeclusteradm"
+# Contact address for the managed account (surname.username@domain). The CSR
+# deliberately carries no email DN component: the kubeAdministrators profile
+# builds the issued certificate DN from the CSR's CN only.
+ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
+# Second FreeIPA CA that signs all K8s *client* certificates (front-proxy, kubelet,
+# node, admin). CA #1 (kubernetes-ca) signs the API server *serving* cert and the
+# kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
+# kubeclusteradm CA. See tasks/ipa-kubeclusteradm-ca.yml.
+ipa_kubeclusteradm_ca_name: "kubeclusteradm"
 kube_cni: "calico" # calico or flannel
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
@@ -30,3 +44,4 @@ orchestration_readiness_delay: 5
 kubernetes_node_cert_ttl_days: 365
 kubernetes_rollout_wait_timeout: 300
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
+vault_kube_admin_password: "KubeClusterAdm2026"

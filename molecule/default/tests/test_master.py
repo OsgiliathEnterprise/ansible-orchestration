@@ -220,22 +220,43 @@ def test_kubectl_get_nodes_matches_inventory(host):
         assert actual == expected, f"cluster nodes {actual} != inventory hosts {expected}"
 
 
-def test_admin_cert_issuer_is_kubernetes_ca(host):
+def test_admin_cert_issuer_is_kubeclusteradm_ca(host):
+    """The cluster-admin client cert is signed by the client CA (CA #2), not the serving CA."""
     with host.sudo():
         cmd = host.run(
             "openssl x509 -in /home/kubecreds/kubeadm.crt -noout -issuer | "
-            "grep -ic 'kubernetes-ca'"
+            "grep -ic 'kubeclusteradm'"
         )
     assert int(cmd.stdout) > 0
 
 
-def test_admin_cert_signed_by_kubernetes_ca(host):
+def test_admin_cert_signed_by_kubeclusteradm_ca(host):
     with host.sudo():
         cmd = host.run(
             "openssl x509 -in /home/kubecreds/kubeadm.crt -noout -issuer | "
-            "grep -ic 'kubernetes-ca'"
+            "grep -ic 'kubeclusteradm'"
         )
     assert int(cmd.stdout) > 0
+
+
+def test_client_ca_bundle_is_ca2_then_ca1(host):
+    """/etc/kubernetes/pki/ca-bundle.crt is the two-CA bundle consumed by --client-ca-file /
+    --root-ca-file: the kubeclusteradm CA (CA #2) first, then the kubernetes-ca CA (CA #1)."""
+    with host.sudo():
+        total = host.run("grep -c 'BEGIN CERTIFICATE' /etc/kubernetes/pki/ca-bundle.crt")
+        issuers = host.run(
+            "openssl crl2pkcs7 -nocrl -certfile /etc/kubernetes/pki/ca-bundle.crt | "
+            "openssl pkcs7 -print_certs -noout | grep '^issuer='"
+        )
+    assert int(total) == 2, f"ca-bundle.crt must hold exactly 2 certs, found {total}"
+    lines = issuers.stdout.splitlines()
+    assert len(lines) == 2, f"expected 2 issuer lines, got {lines!r}"
+    assert 'kubeclusteradm' in lines[0], (
+        f"first cert in bundle must be the kubeclusteradm CA (CA #2): {lines!r}"
+    )
+    assert 'kubernetes-ca' in lines[1], (
+        f"second cert in bundle must be the kubernetes-ca CA (CA #1): {lines!r}"
+    )
 
 
 def test_kubeconfig_certificate_authority_is_kubernetes_ca(host):
@@ -324,22 +345,57 @@ def test_apiserver_crt_signed_by_kubernetes_ca(host):
     assert int(cmd.stdout) > 0
 
 
-def test_apiserver_kubelet_client_crt_signed_by_kubernetes_ca(host):
+def test_apiserver_kubelet_client_crt_signed_by_kubeclusteradm_ca(host):
+    """Client cert: signed by the client CA (CA #2), not the serving CA."""
     with host.sudo():
         cmd = host.run(
             "openssl x509 -in /etc/kubernetes/pki/apiserver-kubelet-client.crt -noout -issuer | "
-            "grep -ic 'kubernetes-ca'"
+            "grep -ic 'kubeclusteradm'"
         )
     assert int(cmd.stdout) > 0
 
 
-def test_front_proxy_client_crt_signed_by_kubernetes_ca(host):
+def test_front_proxy_client_crt_signed_by_kubeclusteradm_ca(host):
+    """Client cert: signed by the client CA (CA #2), not the serving CA."""
     with host.sudo():
         cmd = host.run(
             "openssl x509 -in /etc/kubernetes/pki/front-proxy-client.crt -noout -issuer | "
-            "grep -ic 'kubernetes-ca'"
+            "grep -ic 'kubeclusteradm'"
         )
     assert int(cmd.stdout) > 0
+
+
+def test_cm_scheduler_cert_signed_by_kubeclusteradm_ca(host):
+    """Controller-manager and scheduler client certs: signed by the client CA (CA #2), not the serving CA."""
+    for service in ("controller-manager", "scheduler"):
+        with host.sudo():
+            cmd = host.run(
+                f"openssl x509 -in /etc/kubernetes/pki/{service}-client.crt -noout -issuer | "
+                f"grep -ic 'kubeclusteradm'"
+            )
+        assert int(cmd.stdout) > 0, (
+            f"{service} client cert must be signed by the kubeclusteradm CA"
+        )
+
+
+def test_cm_scheduler_identity_preserved(host):
+    """Re-issued client certs keep their CN and O so the API server still authenticates the pods."""
+    expected = {
+        "controller-manager": ("CN=system:kube-controller-manager", "O=system:masters"),
+        "scheduler": ("CN=system:kube-scheduler", "O=system:masters"),
+    }
+    for service, (cn, org) in expected.items():
+        with host.sudo():
+            cmd = host.run(
+                f"openssl x509 -in /etc/kubernetes/pki/{service}-client.crt "
+                f"-noout -subject -nameopt RFC2253"
+            )
+        assert cn in cmd.stdout, (
+            f"{service} client cert must retain {cn}: {cmd.stdout!r}"
+        )
+        assert org in cmd.stdout, (
+            f"{service} client cert must retain {org}: {cmd.stdout!r}"
+        )
 
 
 def test_kubernetes_ca_signed_by_ipa_root_ca(host):
@@ -446,15 +502,16 @@ def test_ca_acl_grants_all_kube_hosts(host):
     runner = ansible_runner.AnsibleRunner(os.environ["MOLECULE_INVENTORY_FILE"])
     expected = sorted(runner.get_hosts("kube_master") + runner.get_hosts("kube_node"))
     with host.sudo():
-        cmd = host.run(
-            "echo '123ADMin' | kinit admin > /dev/null 2>&1 && "
-            "ipa caacl-show kubernetes-ca-acl --all"
-        )
-    # `ipa caacl-show --all` lists granted hosts under a `Hosts:` attribute (not "Member hosts:").
-    member_lines = [line for line in cmd.stdout.splitlines() if "Hosts:" in line]
-    members_blob = " ".join(member_lines)
-    missing = [h for h in expected if h not in members_blob]
-    assert not missing, f"kubernetes-ca-acl is missing host grants: {missing}"
+        host.run("echo '123ADMin' | kinit admin > /dev/null 2>&1")
+        # Both CAs need host grants: renewal authenticates as the host principal against
+        # whichever CA issued the cert (serving cert -> CA #1, client certs -> CA #2).
+        for acl in ("kubernetes-ca-acl", "kubeclusteradm-acl"):
+            cmd = host.run(f"ipa caacl-show {acl} --all")
+            # `ipa caacl-show --all` lists granted hosts under a `Hosts:` attribute (not "Member hosts:").
+            member_lines = [line for line in cmd.stdout.splitlines() if "Hosts:" in line]
+            members_blob = " ".join(member_lines)
+            missing = [h for h in expected if h not in members_blob]
+            assert not missing, f"{acl} is missing host grants: {missing}"
 
 
 def test_cert_renewal_noop_tick_does_not_churn(host):

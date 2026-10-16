@@ -31,12 +31,24 @@
 
 # ipacert also requires an existing service principal for every DNS SAN
 # ("The service principal for subject alt name X ... does not exist").
-
+#
+# skip_host_check: True — the alias names are DNS names, not IPA host entries, so the
+# host_show lookup is skipped.
+# force: True — the ipaservice pre_callback still runs util.verify_host_resolvable(),
+# which resolves the name through the IPA *server host's system resolver* (not the IPA
+# zone database). The idm link's resolvectl races the IPA DNS servers (authoritative,
+# answer) against the public upstream (NXDOMAIN for the company domain); whichever
+# answers first is adopted and cached for the negative-cache TTL, so the check is flaky
+# per cache window even though the A records exist in the zone. The invariant it guards
+# ("hostname has an A record in the zone") is enforced earlier by ipa-kubernetes-ca.yml
+# (A+PTR records for kubernetes-svc / kubernetes-master); force skips only the
+# resolvability check (matches the HTTP/<master> task above, which already uses force).
 - name: Ipa-api-server | configure http services for SAN alias names (satisfies ipacert service principal check)
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
     name: "{{ item }}"
     skip_host_check: True
+    force: True
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   loop:

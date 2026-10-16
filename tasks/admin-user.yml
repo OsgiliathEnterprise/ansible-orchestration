@@ -1,99 +1,153 @@
 ---
-# Create a dedicated kubeadmin user in FreeIPA and provision its client certificate for kubectl access.
-# The CSR is generated locally (on the control node) so the private key never leaves this machine;
-# only the public CSR is submitted to IPA PKI. On re-converge, an existing kubeadm.crt short-circuits
-# both CSR generation and the IPA enrollment path.
+# Admin user credential: generate key + CSR on master, enroll the CSR under the
+# kubeclusteradm CA (CA #2, kubeAdministrators profile), and point admin.conf's
+# client certificate at the issued certificate so root's kubectl uses it.
+#
+# The kubeclusteradm IPA user itself is created (without a password) by
+# ipa-kube-admin-credential.yml, which runs before this file — the user must
+# exist before the CSR is enrolled (its CN is resolved to the principal).
 
-- name: Check whether a kubeadmin client certificate already exists
+- name: Admin-user | ensure credential folder exists
+  ansible.builtin.file:
+    path: "{{ kube_credential_folder }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+# --- Legacy CSR cleanup ---------------------------------------------------
+# Before `use_common_name_for_san: false`, the openssl_csr module generated the
+# CSR with a `DNS:<CN>` SAN, which FreeIPA rejects for user principals
+# ("subject alt name type DNSName is forbidden for user principals",
+# ipaserver/plugins/cert.py). The module reuses an existing CSR file even when
+# it no longer matches its parameters, so a legacy CSR left on a
+# re-provisioned master is re-sent as-is and ipacert fails again. The CSR file
+# is PEM (base64-encoded DER) — neither the raw content nor its b64decode
+# contains the human-readable extension name, so a SAN is only visible in
+# `openssl req -text` output. No native module inspects CSR extensions
+# (community.crypto.x509_certificate_info is certificate-only), hence this
+# strictly read-only command.
+- name: Admin-user | check for a legacy CSR carrying a DNS SAN
+  # Shell required: no native module inspects CSR extensions (community.crypto
+  # x509_certificate_info is certificate-only) and the `command` module does
+  # not interpret pipes (`|`/`||` become literal arguments to openssl).
+  # Strictly read-only (openssl -noout + grep), so changed_when: false is
+  # truthful. `|| true` keeps the task green when the CSR is absent (fresh
+  # master) or carries no SAN (grep -c exits 1 on a zero count).
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl req -in {{ kube_credential_folder }}/kubeadm.csr -noout -text |
+    grep -c 'X509v3 Subject Alternative Name' || true
+  register: kube_admin_csr_san
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Admin-user | remove legacy CSR and key so a SAN-free CSR is regenerated
+  # The key and CSR are generated together, so remove both to force a clean
+  # regeneration. `file: state: absent` is idempotent and reports the change
+  # truthfully.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  become: true
+  loop:
+    - "{{ kube_credential_folder }}/kubeadm.csr"
+    - "{{ kube_credential_folder }}/kubeadm.pem"
+  when: kube_admin_csr_san.stdout | default('0') | int > 0
+
+- name: Admin-user | generate RSA private key for admin client certificate
+  community.crypto.openssl_privatekey:
+    path: "{{ kube_credential_folder }}/kubeadm.pem"
+    size: "{{ kube_credential_key_bits }}"
+    type: RSA
+    mode: "0644"
+  become: true
+
+- name: Admin-user | generate CSR for admin client certificate
+  # FreeIPA user-principal CSR rules (ipaserver/plugins/cert.py, verified on
+  # 4.13.4): the DN commonName must equal the user's login ("DN commonName
+  # does not match user's login") — `common_name` sets exactly that — and any
+  # subjectAltName entry of DNS or IP type is rejected ("subject alt name
+  # type DNSName is forbidden for user principals").
+  # `use_common_name_for_san: false` is mandatory: the module's default
+  # derives a `DNS:<CN>` SAN from the common_name parameter, which the
+  # enrollment below would reject.
+  community.crypto.openssl_csr:
+    path: "{{ kube_credential_folder }}/kubeadm.csr"
+    privatekey_path: "{{ kube_credential_folder }}/kubeadm.pem"
+    common_name: "{{ ipa_kube_admin_principal }}"
+    country_name: "{{ kube_credential_country_name }}"
+    use_common_name_for_san: false
+  become: true
+
+- name: Admin-user | check if admin client certificate exists
   ansible.builtin.stat:
     path: "{{ kube_credential_folder }}/kubeadm.crt"
-  register: orchestration_admin_cert
+  register: kube_admin_cert_stat
+  become: true
 
-- name: Generate kubeadmin private key and CSR (control node only)
-  community.crypto.openssl_csr:
-    private_key_path: "{{ kube_credential_folder }}/kubeadm.key"
-    common_name: "kubeadmin"
-    country_name: "FR"
-    state: present
-    path: "{{ kube_credential_folder }}/kubeadm.csr"
-  when: not orchestration_admin_cert.stat.exists
-
-- name: Read CSR for IPA enrollment
-  ansible.builtin.slurp:
-    src: "{{ kube_credential_folder }}/kubeadm.csr"
-  register: orchestration_admin_csr
-  when: not orchestration_admin_cert.stat.exists
-
-# --- FreeIPA PKI path (master only) -------------------------------------
-
-- name: Create the kubeadmin user in FreeIPA
-  community.ipa.ipauser:
-    ipahost: "{{ freeipa_server }}"
-    principal: "kubeadmin"
-    password: "{{ freeipa_admin_password }}"
-    state: present
-  when:
-    - not orchestration_admin_cert.stat.exists
-    - kube_masters_group is defined
-
-- name: Enroll the kubeadmin CSR in FreeIPA PKI and store the certificate
-  community.ipa.ipacert:
-    ipahost: "{{ freeipa_server }}"
-    principal: "kubeadmin"
-    password: "{{ freeipa_admin_password }}"
+- name: "Admin-user | enroll CSR under the kubeclusteradm CA (CA #2, kubeAdministrators profile)"
+  # Native FreeIPA enrollment module — the community.crypto `ipa` provider was
+  # removed in community.crypto 2.0.0, so enrollment follows the sibling files
+  # (kube-node-cert.yml, ipa-api-server.yml). `ipa_kube_admin_principal` is the
+  # bare IPA username (no @realm — the task runs on the master, which is an IPA
+  # client and resolves the realm itself); the profile template adds the
+  # system: prefix, so the issued cert is O=system:masters, CN=system:admin.
+  # The CA is CA #2 (kubeclusteradm): the cluster-admin client cert is a *client*
+  # cert, which CA #2 signs (CA #1 signs the API server serving cert only).
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
+    principal: "{{ ipa_kube_admin_principal }}"
     csr_file: "{{ kube_credential_folder }}/kubeadm.csr"
     certificate_out: "{{ kube_credential_folder }}/kubeadm.crt"
-  when:
-    - not orchestration_admin_cert.stat.exists
-    - kube_masters_group is defined
+    profile_id: kubeAdministrators
+    state: requested
+  become: true
+  no_log: "{{ secure_logs }}"
+  when: not kube_admin_cert_stat.stat.exists
 
-# --- kubectl configuration -------------------------------------------------
+- name: Admin-user | patch admin.conf user entry with IPA-issued client certificate
+  # Shell required: the kubernetes.core.k8s module cannot patch the kubeconfig file
+  # in place (it manages API objects, not credential files). kubectl config is the
+  # native kubeconfig editing tool. `set -e` so a mid-script failure is not masked
+  # by a later successful command; `set-credentials` keeps the pre-existing
+  # base64-embedded `client-certificate-data`/`client-key-data` attributes, which
+  # client-go would prefer over the file paths, so they are unset explicitly
+  # (`|| true`: absent on a hand-edited config). The kubeadm-generated admin.conf
+  # user is `kubernetes-admin` and its context `kubernetes-admin@kubernetes` —
+  # root's kubectl default, which this patch re-points at the IPA-issued pair.
+  ansible.builtin.shell: |
+    set -e
+    kubectl config set-credentials kubernetes-admin --client-certificate="{{ kube_credential_folder }}/kubeadm.crt" --client-key="{{ kube_credential_folder }}/kubeadm.pem" --kubeconfig=/etc/kubernetes/admin.conf
+    kubectl config unset kubernetes-admin.client-certificate-data --kubeconfig=/etc/kubernetes/admin.conf || true
+    kubectl config unset kubernetes-admin.client-key-data --kubeconfig=/etc/kubernetes/admin.conf || true
+    kubectl config use-context kubernetes-admin@kubernetes --kubeconfig=/etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
 
-- name: Create the kubeadmin user on the master node
-  ansible.builtin.user:
-    name: "{{ admin_user }}"
-    shell: /bin/bash
-    groups: "{{ admin_user_groups | join(',') }}"
-    state: present
+- name: Admin-user | verify admin.conf references the IPA-issued certificate
+  # Read-only kubeconfig inspection (config view): changed_when: false is
+  # truthful. The gate is a real assertion (the user entry must reference the
+  # file paths), not blanket suppression. In the kubeconfig JSON the credential
+  # fields live under the `user` sub-object of the entry (users[].user.*), so
+  # the jsonpath must descend through `.user` — without it the expression
+  # resolves to empty and the gate fails on an actually-correct admin.conf.
+  ansible.builtin.command: >-
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf config view --minify
+    -o jsonpath='{.users[?(@.name=="kubernetes-admin")].user.client-certificate}'
+  become: true
+  register: kube_admin_conf_cert
+  changed_when: false
+  failed_when: kube_admin_conf_cert.stdout != "{{ kube_credential_folder }}/kubeadm.crt"
 
-- name: Ensure .kube directory exists for kubeadmin
-  ansible.builtin.file:
-    path: "/home/{{ admin_user }}/.kube"
-    owner: "{{ admin_user }}"
-    group: "{{ admin_user }}"
-    mode: "0755"
-    state: directory
-
-- name: Write kubeconfig for kubeadmin with client certificate
-  ansible.builtin.copy:
-    dest: "/home/{{ admin_user }}/.kube/config"
-    owner: "{{ admin_user }}"
-    group: "{{ admin_user }}"
-    mode: "0644"
-    content: |
-      apiVersion: v1
-      kind: Config
-      clusters:
-        - cluster:
-            certificate-authority: /etc/kubernetes/pki/kubelet-ca-current.pem
-            server: https://{{ master_ip }}:6443
-          name: osgiliath
-      contexts:
-        - context:
-            cluster: osgiliath
-            user: kubeadmin
-          name: osgiliath
-      current-context: osgiliath
-      users:
-        - name: kubeadmin
-          user:
-            client-certificate: "{{ kube_credential_folder }}/kubeadm.crt"
-            client-key: "{{ kube_credential_folder }}/kubeadm.key"
-
-- name: Copy the kubeadmin certificate to the master node for kubectl use
-  ansible.builtin.copy:
-    src: "{{ kube_credential_folder }}/kubeadm.crt"
-    dest: "/home/{{ admin_user }}/.kube/kubeadmin.crt"
-    owner: "{{ admin_user }}"
-    group: "{{ admin_user }}"
-    mode: "0644"
+- name: Admin-user | verify cluster API accepts the CA #2 admin client certificate
+  # Moved here from ipa-kube-admin-credential.yml: the API server's --client-ca-file is
+  # the 2-CA bundle (CA #2 + CA #1) built in ipa-certs.yml, so it only trusts the
+  # CA #2-issued kubernetes-admin cert AFTER the re-embed above. This end-to-end gate
+  # must pass before ipa-pki-swap.yml runs (main.yml ordering), because the pki-swap
+  # gates (KCM lease, scheduler Ready, kubectl) authenticate with this same admin.conf.
+  # Read-only API call: changed_when: false is truthful.
+  ansible.builtin.command: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
+  become: true
+  changed_when: false

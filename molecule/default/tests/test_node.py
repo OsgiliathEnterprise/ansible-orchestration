@@ -50,11 +50,12 @@ def test_node_client_cert_has_node_identity(host):
     assert 'system:node' in cmd.stdout
 
 
-def test_node_client_cert_signed_by_kubernetes_ca(host):
+def test_node_client_cert_signed_by_kubeclusteradm_ca(host):
+    """The node client cert is signed by the client CA (CA #2), not the serving CA."""
     with host.sudo():
         cmd = host.run(
             "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -issuer | "
-            "grep -ic 'kubernetes-ca'"
+            "grep -ic 'kubeclusteradm'"
         )
     assert int(cmd.stdout) > 0
 
@@ -116,14 +117,17 @@ def test_cert_renewal_noop_tick_does_not_churn(host):
 
 
 def test_cert_renewal_forced_eligibility_extends_node_client(host):
-    """Force eligibility: the full renewal path re-issues from the existing key and reloads
-    kubelet. Placed last on purpose — it restarts kubelet (brief NotReady window)."""
+    """Force eligibility: the full renewal path re-issues from the existing key and
+    restarts kubelet. Placed last on purpose — it restarts kubelet (brief NotReady
+    window)."""
     serial_cmd = "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -serial"
+    issuer_cmd = "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -issuer"
     with host.sudo():
         serial_before = host.run(serial_cmd).stdout
         cmd = host.run("RENEW_THRESHOLD_DAYS=3650 /usr/local/sbin/kube-cert-renew.sh")
         assert cmd.rc == 0, f"forced renewal failed: {cmd.stderr}"
         serial_after = host.run(serial_cmd).stdout
+        issuer_after = host.run(issuer_cmd).stdout
         # kubelet restart is async from the script's point of view; poll for readiness.
         kubelet_active = ""
         for _ in range(30):
@@ -132,4 +136,7 @@ def test_cert_renewal_forced_eligibility_extends_node_client(host):
                 break
             time.sleep(2)
     assert serial_before != serial_after, "forced eligibility must re-issue the node client cert"
+    assert 'kubeclusteradm' in issuer_after.stdout, (
+        f"renewed node client cert must be issued by the client CA (CA #2): {issuer_after.stdout!r}"
+    )
     assert 'active' in kubelet_active

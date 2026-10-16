@@ -20,3 +20,8 @@ A worker node SHALL wait until the Kubernetes API server reports healthy before 
 - **WHEN** the API server serves a certificate that does not chain to the node's trust anchor (e.g. the master was re-initialized after the node's anchor was fetched)
 - **THEN** the readiness gate fails with a TLS verification error at the top of the join block
 - **THEN** no drop-in surgery, kubelet state reset, or kubelet restart occurs before the failure surfaces
+
+#### Scenario: Trust anchor survives node state reset
+- **WHEN** the join block resets kubeadm state after the readiness gate passes (the reset wipes `/etc/kubernetes/pki/`)
+- **THEN** the trust anchor is reinstalled on the node from the verified fetch before kubelet configuration proceeds
+- **AND** kubelet starts with a valid `certificate-authority` file present
