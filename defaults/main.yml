@@ -41,7 +41,6 @@ kubernetes_api_ready_delay: 10
 # Budget for node-join readiness gates (IPA kubernetesNodes profile + API reachability)
 orchestration_readiness_retries: 40
 orchestration_readiness_delay: 5
-kubernetes_node_cert_ttl_days: 365
 kubernetes_rollout_wait_timeout: 300
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
 vault_kube_admin_password: "KubeClusterAdm2026"

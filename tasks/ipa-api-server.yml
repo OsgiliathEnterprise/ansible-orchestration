@@ -5,16 +5,6 @@
   register: orchestration_apiservercert
   become: true
 
-# - name: ansible-orchestration | ipa-api-server | Check that the apiserver.crt exists
-#  shell: |
-#    set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-#    ipa cert-find --ca=kubernetes-ca --subject={{ orchestration_host_hostname }} --exact | grep -c 'Status: VALID'
-#  no_log: "{{ secure_logs }}"
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  changed_when: False
-#  failed_when: False
-#  register: ipa_server_cert_valid
-
 - name: Ipa-api-server | configure http service
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
@@ -78,16 +68,6 @@
   when:
    - not orchestration_apiservercert.stat.exists
   become: true
-
-# - name: ansible-orchestration | ipa-api-server | apiserver service to kubernetes adminstrator group
-#  freeipa.ansible_freeipa.ipagroup:
-#    ipaadmin_password: "{{ company_realm_password }}"
-#    name: "kubernetes-administrators"
-#    service: "HTTP/api.kubernetes.{{ company_domain }}"
-#  no_log: "{{ secure_logs }}"
-#  delegate_to: "{{ groups[idm_group][0] }}"
-#  when:
-#   - not ipa_group_kubeadm_exists.stdout == '1'
 
 - name: Ipa-api-server | request apiserver certificate from IPA
   freeipa.ansible_freeipa.ipacert:
