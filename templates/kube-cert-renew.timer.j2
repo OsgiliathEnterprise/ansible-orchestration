@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly renewal of kubernetes certificates from the IPA kubernetes-ca
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=4h
+AccuracySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -125,14 +125,27 @@
   become: yes
 
 - name: Kube-install | Restarts coredns after calico installation # needed to fix kubernetes internal dns resolution
-  ansible.builtin.command: "kubectl -n kube-system rollout restart deployment coredns"
-  changed_when: false
+  # Explicit kubeconfig+context: at this point /root/.kube/config does not exist yet (it is only
+  # symlinked later in ipa-pki-swap), so a bare kubectl call would fail and the old failed_when:false
+  # swallowed that — likely a silent no-op on fresh installs. The restartedAt annotation value is
+  # tied to the CNI version, so re-converge at an unchanged calico_cni_version is a no-op.
+  kubernetes.core.k8s:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: kube-system
+    name: coredns
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
+    state: present
+    wait: true
+    wait_timeout: "{{ kubernetes_rollout_wait_timeout }}"
+    resource_definition:
+      spec:
+        template:
+          metadata:
+            annotations:
+              restartedAt: "calico-{{ calico_cni_version }}"
   when: kube_masters_group in group_names
-  delay: 15
-  failed_when: false
-  register: result
-  until: result is succeeded
-  retries: 5
   become: yes
 
 - name: Kube-install | download calicoctl

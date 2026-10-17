@@ -46,6 +46,17 @@ platforms:
     groups:
       - ipaclients
       - kube_node
+  - name: node2.osgiliath.test
+    box: ${TESTBOX:-bento/fedora-43}
+    provider_options:
+      cpus: 4
+      memory: 8192
+    networks:
+      - network: private_network
+        ip: 10.211.55.13
+    groups:
+      - ipaclients
+      - kube_node
 provisioner:
   name: ansible
   env:

@@ -4,12 +4,24 @@ kubernetes_allow_pods_on_master: False
 kube_firewall_zone: 'internal'
 kube_firewall_trusted_zone: "trusted"
 kube_credential_country_name: "FR"
-kube_credential_organization_name: "Osgiliath"
 kube_credential_email_address: "root@osgiliath.net"
-kube_credential_cn: "Kubernetes administration credential"
-kube_cni: "calico" # calico or flannel
+# RSA key size for the cluster-admin client key (4096: the key is long-lived,
+# renewed annually by the ipa-cert-renewal timer)
+kube_credential_key_bits: 4096
+# IPA principal for the cluster-admin user (keytab + cert enrollment)
+ipa_kube_admin_principal: "kubeclusteradm"
+# Contact address for the managed account (surname.username@domain). The CSR
+# deliberately carries no email DN component: the kubeAdministrators profile
+# builds the issued certificate DN from the CSR's CN only.
+ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
+# Second FreeIPA CA that signs all K8s *client* certificates (front-proxy, kubelet,
+# node, admin). CA #1 (kubernetes-ca) signs the API server *serving* cert and the
+# kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
+# kubeclusteradm CA. See tasks/ipa-kubeclusteradm-ca.yml.
+ipa_kubeclusteradm_ca_name: "kubeclusteradm"
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
+orchestration_kube_dns_ip: "10.96.0.10"
 # kube_cidr: "10.244.0.0/16" # Calico default: no guarantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/custom-resources.yaml
 docker_gpg_key: https://download.docker.com/linux/fedora/gpg
 standalone_role: Yes
@@ -20,7 +32,12 @@ kubernetes_package_version: "{{ k8s_version }}.2-150500.2.1"
 calico_cni_version: "v3.32.1"
 calico_os: "linux"
 helm_version: "v3.22.0"
-kubernetes_api_host: "127.0.0.1"
 kubernetes_api_port: 6443
 kubernetes_api_ready_retries: 12
 kubernetes_api_ready_delay: 10
+# Budget for node-join readiness gates (IPA kubernetesNodes profile + API reachability)
+orchestration_readiness_retries: 40
+orchestration_readiness_delay: 5
+kubernetes_rollout_wait_timeout: 300
+kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
+vault_kube_admin_password: "KubeClusterAdm2026"

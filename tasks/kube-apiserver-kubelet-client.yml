@@ -30,10 +30,10 @@
       - clientAuth
   become: true
 
-- name: Kube-apiserver-kubelet-client | request kubelet client certificate from IPA
+- name: "Kube-apiserver-kubelet-client | request kubelet client certificate from the kubeclusteradm CA (CA #2)"
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "host/{{ orchestration_host_hostname }}"
     csr_file: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
     certificate_out: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
@@ -41,3 +41,112 @@
     state: requested
   no_log: "{{ secure_logs }}"
   become: true
+
+- name: Kube-apiserver-kubelet-client | re-point kubelet.conf client cert to the IPA-signed cert
+  # kubelet.conf still points at the kubeadm-CA-signed /var/lib/kubelet/pki/kubelet-client-current.pem,
+  # which the post-swap client CA bundle no longer trusts: the master kubelet would be Unauthorized
+  # on every API call and the node would stay NotReady. `replace` only reports changed when the line
+  # differs, so a re-converge is a no-op. The running kubelet only picks up the new credentials on
+  # restart — ipa-pki-swap.yml restarts it once the API serves the post-swap cert.
+  ansible.builtin.replace:
+    path: /etc/kubernetes/kubelet.conf
+    regexp: '^(\s*)client-certificate:.*'
+    replace: '\1client-certificate: {{ kubernetes_certificates_path }}apiserver-kubelet-client.crt'
+  become: true
+  register: kubelet_conf_client_cert
+
+- name: Kube-apiserver-kubelet-client | re-point kubelet.conf client key to the IPA-signed key
+  ansible.builtin.replace:
+    path: /etc/kubernetes/kubelet.conf
+    regexp: '^(\s*)client-key:.*'
+    replace: '\1client-key: {{ kubernetes_certificates_path }}apiserver-kubelet-client.key'
+  become: true
+  register: kubelet_conf_client_key
+
+# --- Kubelet unit: drop the kubeadm bootstrap mechanism (mirror of the node drop-in) ---
+# The master kubelet unit inherits `--bootstrap-kubeconfig` from the package drop-in
+# (10-kubeadm.conf). With `rotateCertificates: true` in config.yaml, the kubelet
+# bootstraps a client cert that the controller-manager's `bootstrapsigner` controller
+# auto-approves, signed by the original kubeadm CA — which the post-swap client CA
+# bundle (ca-bundle.crt) does not contain. The kubelet then switches to that untrusted
+# store cert and is Unauthorized on every API call. Remove the drop-in and mirror the
+# node's clean unit: kubelet.conf (IPA cert) only, no bootstrap, no rotation.
+
+- name: Kube-apiserver-kubelet-client | remove kubeadm drop-in (carries --bootstrap-kubeconfig)
+  # `failed_when: false`: the drop-in does not exist on nodes that never ran the
+  # bootstrap flow; the restart below is gated on `is changed`, so the absent case
+  # (changed=false) does not trigger a restart.
+  ansible.builtin.file:
+    path: /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+    state: absent
+  become: true
+  failed_when: false
+  register: kubeadm_drop_in_removed
+
+- name: Kube-apiserver-kubelet-client | remove stale bootstrap drop-in if present
+  ansible.builtin.file:
+    path: /etc/systemd/system/kubelet.service.d/20-bootstrap.conf
+    state: absent
+  become: true
+
+- name: Kube-apiserver-kubelet-client | ensure drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/kubelet.service.d
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Kube-apiserver-kubelet-client | create clean kubelet drop-in (no bootstrap, no rotation)
+  # --node-ip pins the registered node IP so a unit restart cannot re-register the node
+  # under a different address (the node drop-in omits it and relies on auto-detection;
+  # the master keeps the explicit IP written by `kubeadm init`).
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/kubelet --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --cgroup-driver=systemd --node-ip={{ orchestration_host_ip | ansible.utils.ipaddr }}
+    dest: /etc/systemd/system/kubelet.service.d/20-orchestration.conf
+    mode: '0644'
+  become: true
+  register: kubelet_drop_in
+
+- name: Kube-apiserver-kubelet-client | remove kubeadm client cert store (rotation target)
+  ansible.builtin.file:
+    path: /var/lib/kubelet/pki
+    state: absent
+  become: true
+
+- name: Kube-apiserver-kubelet-client | remove orphaned bootstrap kubeconfig
+  ansible.builtin.file:
+    path: /etc/kubernetes/bootstrap-kubelet.conf
+    state: absent
+  become: true
+
+- name: Kube-apiserver-kubelet-client | disable client cert rotation in kubelet config
+  # `replace` only reports changed when the line matches; without the line rotation is
+  # already off by default, so a re-converge is a no-op either way.
+  ansible.builtin.replace:
+    path: /var/lib/kubelet/config.yaml
+    regexp: '^rotateCertificates:\s*true'
+    replace: 'rotateCertificates: false'
+  become: true
+  register: rotation_disabled
+
+- name: Kube-apiserver-kubelet-client | reload systemd and restart kubelet with clean unit
+  # The kubelet picks up the new unit and credentials on restart. The API may still be
+  # pre-swap here (client CA = original ca.crt), so the kubelet retries until
+  # ipa-pki-swap.yml restarts it against the post-swap CA bundle.
+  # Gated on a unit/credential task having reported a change: a re-converge where
+  # nothing changed does not churn the kubelet.
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  become: true
+  when:
+    - kubelet_conf_client_cert is changed
+      or kubelet_conf_client_key is changed
+      or kubeadm_drop_in_removed is changed
+      or kubelet_drop_in is changed
+      or rotation_disabled is changed

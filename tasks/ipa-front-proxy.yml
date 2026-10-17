@@ -30,10 +30,10 @@
       - clientAuth
   become: true
 
-- name: Ipa-front-proxy | request front-proxy certificate from IPA
+- name: "Ipa-front-proxy | request front-proxy certificate from the kubeclusteradm CA (CA #2)"
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "host/{{ orchestration_host_hostname }}"
     csr_file: "{{ kubernetes_certificates_path }}front-proxy-client.csr"
     certificate_out: "{{ kubernetes_certificates_path }}front-proxy-client.crt"

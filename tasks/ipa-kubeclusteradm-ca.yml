@@ -1,0 +1,52 @@
+---
+
+# CA #2 (kubeclusteradm) bootstrap.
+#
+# Mirrors the CA #1 (kubernetes-ca) bootstrap in ipa-kubernetes-ca.yml but only
+# creates the second CA and its ACL and links the two global client-cert profiles
+# (kubeAdministrators, kubernetesNodes) to it.
+#
+# - No new cert profiles: kubeAdministrators, kubernetesNodes, kubeControllerManager
+#   and kubeScheduler are global profiles already created by ipa-kubernetes-ca.yml;
+#   CA #2 only needs its ACL linked to them.
+# - No kubernetes-administrators group: shared with CA #1.
+# - No IP-SAN DNS work: CA #2 signs client certs only, whose CSR SANs carry hostnames
+#   (not IPs), and its self-signed CA certificate carries no IP SANs.
+# - Same shell `ipa` commands as CA #1: the installed freeipa.ansible_freeipa v1.17.0
+#   collection does not ship ipa_ca / ipa_ca_acl modules.
+#
+# CA #1 (kubernetes-ca) remains the CA for the API server serving cert; CA #2 signs
+# the front-proxy, kubelet, node, admin, controller-manager and scheduler client certs.
+# The controller-manager/scheduler profiles are static-subject profiles (D3a): the CSR
+# carries the master's hostname (host-principal check), the profile rewrites the issued
+# subject to the exact system:masters identity.
+
+- name: Ipa-kubeclusteradm-ca | ensure kubeclusteradm lightweight ca, acl and membership
+  ansible.builtin.include_tasks: ipa-ca-ensure.yml
+  vars:
+    ipa_ca_ensure_name: "{{ ipa_kubeclusteradm_ca_name }}"
+
+# The global profiles kubeAdministrators, kubernetesNodes, kubeControllerManager and
+# kubeScheduler were created by ipa-kubernetes-ca.yml. Linking them to the CA #2 ACL
+# lets CA #2 sign the same subject shapes as CA #1 (the controller-manager/scheduler
+# profiles are only linked here, not to the CA #1 ACL: CA #2 is their issuing CA).
+#
+# `ipa caacl-add-profile` is NOT idempotent: re-linking an existing profile exits
+# rc=1 with "This entry is already a member" and aborts the play (verified against
+# the installed freeipa). Membership is therefore checked read-only via
+# `ipa caacl-show --all` (the Profiles: line) and the add runs only when the
+# profile is absent — the same if/grep pattern as ipa-cert-renewal.yml. This keeps
+# re-converge safe: delete-ipa-cleanup.yml deletes CA #2 but keeps its ACL (the
+# profile links survive the CA deletion), and a failed or partially skipped reset
+# can leave the chain intact.
+
+- name: Ipa-kubeclusteradm-ca | link profiles to the kubeclusteradm ca-acl
+  ansible.builtin.include_tasks: ipa-ca-link-profile.yml
+  loop:
+    - kubeAdministrators
+    - kubernetesNodes
+    - kubeControllerManager
+    - kubeScheduler
+  vars:
+    ipa_ca_link_acl: "{{ ipa_kubeclusteradm_ca_name }}-acl"
+    ipa_ca_link_profile: "{{ item }}"

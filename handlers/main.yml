@@ -1,13 +1,5 @@
 ---
 # handlers file for ansible-orchestration
-- name: Handler | refresh kube
-  ansible.builtin.systemd:
-    state: restarted
-    daemon_reload: yes
-    name: kubelet
-  become: true
-  listen: ansible-orchestration | refresh kube
-
 - name: Handler | refresh containerd
   ansible.builtin.systemd:
     state: restarted

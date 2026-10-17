@@ -12,10 +12,13 @@
   when: _cleanup_admin_cert_stat.stat.exists
   become: true
 
-- name: Delete-ipa-cleanup | Revoke admin certificate from IPA using serial number
+- name: "Delete-ipa-cleanup | Revoke admin certificate from the kubeclusteradm CA (CA #2) using serial number"
+  # The cluster-admin client cert is enrolled under CA #2 (kubeclusteradm), so the
+  # revocation targets CA #2. `failed_when: false` — the cert may not exist (fresh
+  # destroy) or may already be revoked.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     serial_number: "{{ '%X' | format(_cleanup_admin_cert_info.serial_number) }}"
     state: revoked
     reason: 4
@@ -62,10 +65,12 @@
   when: _cleanup_kubelet_cert_stat.stat.exists
   become: true
 
-- name: Delete-ipa-cleanup | Revoke kubelet client certificate from IPA using serial number
+- name: "Delete-ipa-cleanup | Revoke kubelet client certificate from the kubeclusteradm CA (CA #2) using serial number"
+  # The kubelet client cert is re-registered under CA #2 (kubeclusteradm), so the
+  # revocation targets CA #2. `failed_when: false` — the cert may not exist.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     serial_number: "{{ '%X' | format(_cleanup_kubelet_cert_info.serial_number) }}"
     state: revoked
     reason: 4
@@ -87,10 +92,12 @@
   when: _cleanup_frontproxy_cert_stat.stat.exists
   become: true
 
-- name: Delete-ipa-cleanup | Revoke front-proxy certificate from IPA using serial number
+- name: "Delete-ipa-cleanup | Revoke front-proxy certificate from the kubeclusteradm CA (CA #2) using serial number"
+  # The front-proxy client cert is re-registered under CA #2 (kubeclusteradm), so
+  # the revocation targets CA #2. `failed_when: false` — the cert may not exist.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
-    ca: kubernetes-ca
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
     serial_number: "{{ '%X' | format(_cleanup_frontproxy_cert_info.serial_number) }}"
     state: revoked
     reason: 4
@@ -98,3 +105,94 @@
   when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_info is defined
   become: true
   no_log: "{{ secure_logs }}"
+
+- name: "Delete-ipa-cleanup | check if the kubeclusteradm CA (CA #2) exists"
+  # Shell required: the installed freeipa.ansible_freeipa (v1.17.0) ships no
+  # CA-management module (ipaca), so CA inspection/deletion follows the shell
+  # `ipa` pattern of ipa-kubeclusteradm-ca.yml (delegated to idm, admin
+  # ticket). Strictly read-only (ca-find + grep -c): changed_when: false is
+  # truthful; `|| true` keeps the task green when the CA is absent.
+  ansible.builtin.shell: |
+    set -euo pipefail
+    echo '{{ company_realm_password }}' | kinit admin > /dev/null
+    ipa ca-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}' || true
+  register: _cleanup_kubeclusteradm_ca_exists
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: "Delete-ipa-cleanup | check if the kubeclusteradm CA ACL (CA #2) exists"
+  # Same shell rationale as the CA existence check above (no CA-ACL module in
+  # the installed freeipa.ansible_freeipa). Strictly read-only: `changed_when:
+  # false` is truthful; `|| true` keeps the task green when the ACL is absent.
+  # The ACL check reuses the admin ticket established by the CA check's kinit.
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa caacl-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}-acl' || true
+  register: _cleanup_kubeclusteradm_ca_acl_exists
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: "Delete-ipa-cleanup | unlink the kubeclusteradm CA from its CA ACL"
+  # `ipa ca-del` refuses to delete a CA still linked to a CA ACL. The check is
+  # read-only (caacl-show + grep) and the unlink runs only when the CA is
+  # actually linked: re-runs and fresh hosts are no-ops. The ACL itself is kept
+  # in place (CA #1's destroy path keeps its ACL the same way) — its profile
+  # links survive the CA deletion, so ipa-kubeclusteradm-ca.yml only needs to
+  # re-add the CA membership on the next converge. `changed_when` keys off a
+  # marker echoed only on the unlink path.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *CAs:.*{{ ipa_kubeclusteradm_ca_name }}"; then
+      ipa caacl-remove-ca {{ ipa_kubeclusteradm_ca_name }}-acl --ca {{ ipa_kubeclusteradm_ca_name }}
+      echo "CA-UNLINKED"
+    else
+      echo "CA-NOT-LINKED"
+    fi
+  when:
+    - _cleanup_kubeclusteradm_ca_exists.stdout == '1'
+    - _cleanup_kubeclusteradm_ca_acl_exists.stdout == '1'
+  register: _cleanup_kubeclusteradm_ca_unlink
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: "'CA-UNLINKED' in _cleanup_kubeclusteradm_ca_unlink.stdout"
+  become: true
+
+- name: "Delete-ipa-cleanup | disable the kubeclusteradm CA before deletion"
+  # `ipa ca-del` also refuses an *enabled* CA ("Must be disabled first"), so
+  # the disable precedes the delete. Tolerated: an already-disabled CA fails
+  # the command (rc=1) and `failed_when: false` keeps the task green; the
+  # `when:` gate skips it on fresh hosts where the CA does not exist.
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa ca-disable {{ ipa_kubeclusteradm_ca_name }}
+  when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
+  register: _cleanup_kubeclusteradm_ca_disable
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: _cleanup_kubeclusteradm_ca_disable.rc == 0
+  failed_when: false
+  become: true
+
+- name: "Delete-ipa-cleanup | delete the kubeclusteradm CA (CA #2)"
+  # CA #2 (kubeclusteradm) is the client-only CA. It is deleted (not CA #1
+  # kubernetes-ca, which is the API server serving CA and is out of scope). The
+  # client certs are revoked above first; the ACL unlink and disable above make
+  # the delete succeed. `failed_when: false` — the CA may be absent (fresh
+  # host) or the disable may have raced; `changed_when: rc == 0` reports the
+  # delete truthfully. CA #1 is NOT deleted here.
+  ansible.builtin.shell: |
+    set -o pipefail
+    ipa ca-del {{ ipa_kubeclusteradm_ca_name }}
+  when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
+  register: _cleanup_kubeclusteradm_ca_del
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: _cleanup_kubeclusteradm_ca_del.rc == 0
+  failed_when: false
+  become: true

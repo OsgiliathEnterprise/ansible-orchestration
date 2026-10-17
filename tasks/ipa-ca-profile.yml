@@ -1,0 +1,55 @@
+---
+# Ensure a FreeIPA certificate profile exists, derived from caIPAserviceCert.
+#
+# Inputs (include vars):
+#   ipa_ca_profile_id:      profile id (e.g. kubeScheduler).
+#   ipa_ca_profile_desc:    profile description.
+#   ipa_ca_profile_file:    scratch .cfg path on the IPA server.
+#   ipa_ca_profile_subject: Dogtag subject template written to
+#                           policyset.serverCertSet.1.default.params.name.
+#   ipa_ca_profile_extra:   optional list of {line, regexp(optional)} entries added
+#                           to the .cfg (lineinfile semantics).
+#
+# `ipa certprofile-show` exits rc=2 (NOT_FOUND) when the profile is absent.
+
+- name: "Ipa-ca-profile | check if cert profile exists: {{ ipa_ca_profile_id }}"
+  ansible.builtin.command: "ipa certprofile-show {{ ipa_ca_profile_id }}"
+  register: ipa_ca_profile_show
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: ipa_ca_profile_show.rc not in [0, 2]
+  changed_when: false
+  become: true
+
+- name: "Ipa-ca-profile | create profile: {{ ipa_ca_profile_id }}"
+  when: ipa_ca_profile_show.rc == 2
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  block:
+    - name: "Ipa-ca-profile | get the ipa default ca profile for: {{ ipa_ca_profile_id }}"
+      ansible.builtin.command: "ipa certprofile-show --out {{ ipa_ca_profile_file }} caIPAserviceCert"
+      no_log: "{{ secure_logs }}"
+      changed_when: true
+
+    - name: "Ipa-ca-profile | customise the profile: {{ ipa_ca_profile_id }}"
+      ansible.builtin.lineinfile:
+        path: "{{ ipa_ca_profile_file }}"
+        regexp: "{{ item.regexp | default(omit) }}"
+        line: "{{ item.line }}"
+      loop: "{{ _ipa_ca_profile_lines }}"
+      vars:
+        _ipa_ca_profile_lines: >-
+          {{ [
+            {'regexp': '^profileId=', 'line': 'profileId=' ~ ipa_ca_profile_id},
+            {'regexp': '^visible=', 'line': 'visible=true'},
+            {'regexp': ('policyset.serverCertSet.1.default.params.name' | regex_escape) ~ '.*',
+             'line': 'policyset.serverCertSet.1.default.params.name=' ~ ipa_ca_profile_subject}
+          ] + (ipa_ca_profile_extra | default([])) }}
+
+    - name: "Ipa-ca-profile | import the profile: {{ ipa_ca_profile_id }}"
+      ansible.builtin.command: >-
+        ipa certprofile-import {{ ipa_ca_profile_id }}
+        --file {{ ipa_ca_profile_file }}
+        --desc "{{ ipa_ca_profile_desc }}" --store TRUE
+      no_log: "{{ secure_logs }}"
+      changed_when: true

@@ -1,16 +1,7 @@
 ---
 
-- name: Ipa-pki-swap | patch kubeconfigs to use IPA CA cert
-  ansible.builtin.replace:
-    path: "{{ item }}"
-    regexp: '^(\s*)certificate-authority-data:.*'
-    replace: '\1certificate-authority: /etc/kubernetes/pki/ca.crt'
-  loop:
-    - /etc/kubernetes/controller-manager.conf
-    - /etc/kubernetes/scheduler.conf
-    - /etc/kubernetes/kubelet.conf
-    - /etc/kubernetes/admin.conf
-  become: true
+# Kubeconfigs were already re-pointed at the IPA CA in ipa-certs.yml (before the static pod
+# restarts); only URL/readability fixes remain here.
 
 - name: Ipa-pki-swap | ensure kubeconfig files are readable for testinfra
   ansible.builtin.file:
@@ -44,58 +35,66 @@
     replace: 'server: https://{{ orchestration_host_hostname }}:6443'
   become: true
 
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart API server static pod to pick up new cert
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-apiserver.yaml
-    state: touch
-  become: true
-
-- name: Ipa-pki-swap | wait for API server to restart
+# pki-swap only patches kubeconfigs, server URLs and file readability — it never touches the
+# serving certificate, so no restart is implied here. This single validated gate confirms the API
+# is healthy and presents the IPA-CA-anchored serving cert; stabilization semantics are carried
+# by the functional gates below (KCM lease freshness, scheduler Ready).
+- name: Ipa-pki-swap | wait for API server to be healthy with post-swap certificate (validated)
   ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
+    url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
+    ca_path: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true
   register: api_healthz
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: api_healthz.status == 200
+  # uri's `until` only retries when status == 200; on a TLS verification failure (stale CA, cert not yet swapped) the module returns status null and fails immediately without retrying — the guard makes this gate wait for reachability AND trust.
+  until: api_healthz is not skipped and api_healthz.status | default(0) == 200
 
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart controller-manager static pod
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-controller-manager.yaml
-    state: touch
+# Functional gate, not just container Ready: a KCM that cannot verify the API cert (stale CA
+# trust) reports Ready=True yet never renews its leader lease. A fresh lease proves it can
+# actually talk to the API; otherwise fail loudly instead of converging green with dead controllers.
+- name: Ipa-pki-swap | wait for controller manager to hold a fresh leader lease
+  kubernetes.core.k8s_info:
+    api_version: coordination.k8s.io/v1
+    kind: Lease
+    namespace: kube-system
+    name: kube-controller-manager
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-
-# noqa: risky-file-permissions (touch updates mtime only; mode is intentionally unmanaged)
-- name: Ipa-pki-swap | restart scheduler static pod
-  ansible.builtin.file:
-    path: /etc/kubernetes/manifests/kube-scheduler.yaml
-    state: touch
-  become: true
-
-- name: Ipa-pki-swap | wait for cluster to stabilize after CA swap
-  ansible.builtin.uri:
-    url: "https://{{ kubernetes_api_host }}:{{ kubernetes_api_port }}/healthz"
-    validate_certs: no
-    status_code: 200
-  become: true
-  register: cluster_healthz
+  register: cm_lease
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: cluster_healthz.status == 200
+  # Freshness check runs in one controller-side python3 call: ansible-core 2.21's strftime filter no longer
+  # accepts a piped datetime (signature is now strftime(format, epoch)), and renewTime carries fractional
+  # seconds that to_datetime's explicit format cannot parse. fromisoformat handles both shapes cleanly.
+  until: >-
+    (cm_lease.resources | length == 1) and
+    (lookup('pipe', 'RENEW_TIME=' ~ (cm_lease.resources[0].spec.renewTime | default('1970-01-01T00:00:00Z')) ~ ' python3 -c "' ~ "import os,datetime;r=datetime.datetime.fromisoformat(os.environ['RENEW_TIME'].replace('Z','+00:00'));n=datetime.datetime.now(datetime.timezone.utc);print(str((n-r).total_seconds()<90).lower())" ~ '"') == 'true')
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
 
-- name: Ipa-pki-swap | wait for controller manager to be ready
-  # Shell kept as a documented exception: no native module accepts an arbitrary kubeconfig path
-  ansible.builtin.shell: kubectl --kubeconfig /etc/kubernetes/admin.conf get pod -n kube-system -l component=kube-controller-manager -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+# Symmetric with the KCM lease gate above: a crash-looping scheduler (e.g. broken CA trust in
+# its kubeconfig) leaves every unscheduled pod — CNI DaemonSets included — stuck Pending, so
+# converge must not pass it silently.
+- name: Ipa-pki-swap | wait for scheduler static pod to report Ready
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: kube-system
+    label_selectors:
+      - component=kube-scheduler
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
-  register: cm_ready
+  register: scheduler_ready
   retries: "{{ kubernetes_api_ready_retries }}"
   delay: "{{ kubernetes_api_ready_delay }}"
-  until: "'True' in cm_ready.stdout"
+  until: >-
+    (scheduler_ready.resources | length == 1) and
+    ((scheduler_ready.resources[0].status.containerStatuses | default([])) | selectattr('ready', 'equalto', true) | list | length
+     == (scheduler_ready.resources[0].status.containerStatuses | default([]) | length)) and
+    ((scheduler_ready.resources[0].status.containerStatuses | default([]) | length > 0))
   delegate_to: "{{ groups[kube_masters_group] | first }}"
 
 - name: Ipa-pki-swap | add API server override block to kubelet config
@@ -109,14 +108,53 @@
         certAuthority: /etc/kubernetes/pki/ca.crt
         url: https://{{ orchestration_host_hostname }}:6443
   become: true
-  notify: ansible-orchestration | refresh kube
+  register: kubelet_config_override
+
+- name: Ipa-pki-swap | restart kubelet to load post-swap CA and client cert # noqa: no-handler
+  # The running kubelet pinned the pre-swap CA and client cert at startup (both are read only at
+  # boot); after the swap it cannot authenticate to the API (unknown authority) and the master
+  # node stays NotReady. A `notify` here is too late: handlers flush at end of play, i.e. after
+  # the calico-ca-recovery gate below has already timed out. Gate on the block change so a
+  # re-converge (block already present, CA stable) does not churn the kubelet.
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+  become: true
+  when: kubelet_config_override is changed
+
+- name: Ipa-pki-swap | wait for master node to report Ready with post-swap trust
+  # Functional gate, not just a sleep: the restarted kubelet must re-establish heartbeats
+  # against the post-swap API before the calico-ca-recovery rollout. The master's calico-node
+  # pod can be scheduled on a NotReady node (calico tolerates every taint) but cannot reach
+  # Ready while its node's kubelet cannot report pod status.
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    name: "{{ orchestration_host_hostname }}"
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
+  become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  register: master_node_ready
+  retries: "{{ kubernetes_api_ready_retries }}"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: >-
+    (master_node_ready.resources | length == 1) and
+    ((master_node_ready.resources[0].status.conditions | default([])
+       | selectattr('type', 'equalto', 'Ready')
+       | selectattr('status', 'equalto', 'True') | list | length) > 0)
 
 - name: Ipa-pki-swap | verify kubectl can connect with new CA
-  ansible.builtin.shell: |
-    kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info
+  kubernetes.core.k8s_cluster_info:
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
   become: true
-  changed_when: false
   register: kubectl_verify
   retries: 6
-  delay: 10
-  until: "'Kubernetes control plane' in kubectl_verify.stdout"
+  delay: "{{ kubernetes_api_ready_delay }}"
+  until: (kubectl_verify.version | default({})) | length > 0
+
+# Data-plane recovery must run last: after the explicit kubelet restart above (so a recreated
+# pod mounts the post-swap CA) and after cluster stabilization. No-op when Calico is absent.
+- name: Ipa-pki-swap | recover Calico/Tigera data-plane workloads after CA swap
+  ansible.builtin.include_tasks: calico-ca-recovery.yml
