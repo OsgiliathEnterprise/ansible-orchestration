@@ -1,0 +1,24 @@
+---
+# Link a certificate profile to a CA ACL, idempotently.
+#
+# Inputs (include vars):
+#   ipa_ca_link_acl:     CA ACL name.
+#   ipa_ca_link_profile: certificate profile id.
+#
+# `ipa caacl-add-profile` is NOT idempotent (rc=1 "This entry is already a member"),
+# so membership is checked read-only first (`caacl-show --all` Profiles: line).
+
+- name: "Ipa-ca-link-profile | link profile to acl {{ ipa_ca_link_acl }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ipa caacl-show {{ ipa_ca_link_acl }} --all | grep -q "^ *Profiles:.*{{ ipa_ca_link_profile }}"; then
+      echo "PROFILE-ALREADY-LINKED"
+    else
+      ipa caacl-add-profile {{ ipa_ca_link_acl }} --certprofile {{ ipa_ca_link_profile }}
+      echo "PROFILE-LINKED"
+    fi
+  register: ipa_ca_link_result
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: "'PROFILE-LINKED' in ipa_ca_link_result.stdout"
+  become: true

@@ -1,0 +1,48 @@
+---
+argument_specs:
+  main:
+    short_description: Kubernetes cluster (kubeadm) secured by FreeIPA CAs, with FreeIPA-secured NFS volumes
+    options:
+      company_domain:
+        type: str
+        required: true
+        description: DNS domain of the platform (FreeIPA domain).
+      company_realm_password:
+        type: str
+        required: true
+        no_log: true
+        description: FreeIPA admin password.
+      secure_logs:
+        type: bool
+        default: true
+        description: Hide the output of tasks handling secrets.
+      reset_kube:
+        type: bool
+        default: false
+        description: Drain and reset the cluster before converging.
+      k8s_version:
+        type: str
+        default: "1.36"
+        description: Kubernetes minor version.
+      kube_cni:
+        type: str
+        default: calico
+        choices: [calico, flannel]
+        description: CNI plugin.
+      kube_cidr:
+        type: str
+        default: 192.168.0.0/16
+        description: Pod network CIDR.
+      kube_service_cidr:
+        type: str
+        default: 10.96.0.0/12
+        description: Service network CIDR.
+      ipa_kubeclusteradm_ca_name:
+        type: str
+        default: kubeclusteradm
+        description: Name of the FreeIPA lightweight CA signing the Kubernetes client certificates.
+      nfs_mountpoints:
+        type: list
+        elements: dict
+        required: false
+        description: NFS servers and their mountpoints exposed as Kubernetes persistent volumes.

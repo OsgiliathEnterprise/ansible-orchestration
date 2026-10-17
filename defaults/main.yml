@@ -8,8 +8,6 @@ kube_credential_email_address: "root@osgiliath.net"
 # RSA key size for the cluster-admin client key (4096: the key is long-lived,
 # renewed annually by the ipa-cert-renewal timer)
 kube_credential_key_bits: 4096
-# Folder holding the cluster-admin key/CSR/cert (and renewal keytab); matches tcharl.ansible_iam
-kube_credential_folder: "/home/kubecreds"
 # IPA principal for the cluster-admin user (keytab + cert enrollment)
 ipa_kube_admin_principal: "kubeclusteradm"
 # Contact address for the managed account (surname.username@domain). The CSR
@@ -21,7 +19,6 @@ ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
 # kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
 # kubeclusteradm CA. See tasks/ipa-kubeclusteradm-ca.yml.
 ipa_kubeclusteradm_ca_name: "kubeclusteradm"
-kube_cni: "calico" # calico or flannel
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
 orchestration_kube_dns_ip: "10.96.0.10"

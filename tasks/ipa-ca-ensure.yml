@@ -1,0 +1,62 @@
+---
+# Ensure a FreeIPA lightweight CA, its CA ACL and the CA/ACL membership exist.
+#
+# Inputs (include vars):
+#   ipa_ca_ensure_name: lightweight CA name; the ACL is named "<name>-acl".
+#
+# `ipa <x>-show` exits rc=2 (NOT_FOUND) when the object is absent; any other
+# non-zero rc is a real failure. `ipa caacl-add-ca` is NOT idempotent (rc=1 "This
+# entry is already a member"), so membership is checked read-only first.
+
+- name: "Ipa-ca-ensure | check if ca exists: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.command: "ipa ca-show {{ ipa_ca_ensure_name }}"
+  register: ipa_ca_ensure_ca
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: ipa_ca_ensure_ca.rc not in [0, 2]
+  changed_when: false
+  become: true
+
+- name: "Ipa-ca-ensure | create lightweight ca: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.command: >-
+    ipa ca-add {{ ipa_ca_ensure_name }}
+    --subject "CN={{ ipa_ca_ensure_name }},O={{ company_domain | upper }}"
+  when: ipa_ca_ensure_ca.rc == 2
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: true
+  become: true
+
+- name: "Ipa-ca-ensure | check if ca acl exists: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.command: "ipa caacl-show {{ ipa_ca_ensure_name }}-acl"
+  register: ipa_ca_ensure_acl
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  failed_when: ipa_ca_ensure_acl.rc not in [0, 2]
+  changed_when: false
+  become: true
+
+- name: "Ipa-ca-ensure | create ca access list: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.command: "ipa caacl-add {{ ipa_ca_ensure_name }}-acl --usercat=all"
+  when: ipa_ca_ensure_acl.rc == 2
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: true
+  become: true
+
+# The ACL persists across destroy (delete-ipa-cleanup.yml keeps it and only
+# deletes CA #2), so the ACL may exist while the recreated CA is not a member.
+- name: "Ipa-ca-ensure | add to its ca-acl: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ipa caacl-show {{ ipa_ca_ensure_name }}-acl --all | grep -q "^ *CAs:.*{{ ipa_ca_ensure_name }}"; then
+      echo "CA-ACL-PRESENT"
+    else
+      ipa caacl-add-ca {{ ipa_ca_ensure_name }}-acl --ca {{ ipa_ca_ensure_name }}
+      echo "CA-ACL-ADDED"
+    fi
+  register: ipa_ca_ensure_acl_add
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: "'CA-ACL-ADDED' in ipa_ca_ensure_acl_add.stdout"
+  become: true

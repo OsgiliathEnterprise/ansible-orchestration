@@ -65,6 +65,7 @@
   delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   register: node_client_key
+  no_log: "{{ secure_logs }}"
   when: not node_client_cert_result.stat.exists
 
 - name: Kube-node-cert | install node client cert on node
@@ -80,6 +81,7 @@
     content: "{{ node_client_key.content | b64decode }}"
     dest: "{{ kubernetes_certificates_path }}node-client.key"
     mode: '0600'
+  no_log: "{{ secure_logs }}"
   become: true
   when: not node_client_cert_result.stat.exists
 

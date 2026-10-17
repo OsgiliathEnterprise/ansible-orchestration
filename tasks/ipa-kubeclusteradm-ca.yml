@@ -21,73 +21,10 @@
 # carries the master's hostname (host-principal check), the profile rewrites the issued
 # subject to the exact system:masters identity.
 
-- name: Ipa-kubeclusteradm-ca | check if kubeclusteradm ca exists
-  ansible.builtin.shell: |
-    set -o pipefail
-    ipa ca-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}'
-  register: ipa_kubeclusteradm_ca_exists
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  failed_when: False
-  changed_when: False
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | create kubeclusteradm lightweight ca
-  ansible.builtin.shell: |
-    set -o pipefail
-    ipa ca-add {{ ipa_kubeclusteradm_ca_name }} --subject "CN={{ ipa_kubeclusteradm_ca_name }},O={{ company_domain | upper }}"
-  when:
-    - not ipa_kubeclusteradm_ca_exists.stdout == '1'
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  changed_when: >-
-    not ipa_kubeclusteradm_ca_exists.stdout == '1'
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | check if kubeclusteradm ca acl exists
-  ansible.builtin.shell: |
-    set -o pipefail
-    ipa caacl-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}-acl'
-  register: ipa_kubeclusteradm_ca_acl_exists
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  failed_when: False
-  changed_when: False
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | create kubeclusteradm ca access list
-  ansible.builtin.shell: |
-    set -o pipefail
-    ipa caacl-add {{ ipa_kubeclusteradm_ca_name }}-acl --usercat=all
-  when:
-    - not ipa_kubeclusteradm_ca_acl_exists.stdout == '1'
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  changed_when: >-
-    not ipa_kubeclusteradm_ca_acl_exists.stdout == '1'
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | add kubeclusteradm-ca to ca-acl
-  # The ACL persists across destroy (delete-ipa-cleanup.yml keeps it and only
-  # deletes CA #2), so on a re-converge the ACL exists while the CA was
-  # recreated without its ACL membership. `ipa caacl-add-ca` is NOT idempotent
-  # (re-adding an existing CA exits rc=1 with "This entry is already a member"),
-  # so the add is gated on a read-only membership check (`ipa caacl-show --all`
-  # lists the linked CAs) — the same if/grep pattern as ipa-cert-renewal.yml.
-  # `changed_when` keys off a marker echoed only on the add path.
-  ansible.builtin.shell: |
-    set -o pipefail
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *CAs:.*{{ ipa_kubeclusteradm_ca_name }}"; then
-      echo "CA-ACL-PRESENT"
-    else
-      ipa caacl-add-ca {{ ipa_kubeclusteradm_ca_name }}-acl --ca {{ ipa_kubeclusteradm_ca_name }}
-      echo "CA-ACL-ADDED"
-    fi
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  register: ipa_kubeclusteradm_ca_acl_add_result
-  changed_when: "'CA-ACL-ADDED' in ipa_kubeclusteradm_ca_acl_add_result.stdout"
-  become: true
+- name: Ipa-kubeclusteradm-ca | ensure kubeclusteradm lightweight ca, acl and membership
+  ansible.builtin.include_tasks: ipa-ca-ensure.yml
+  vars:
+    ipa_ca_ensure_name: "{{ ipa_kubeclusteradm_ca_name }}"
 
 # The global profiles kubeAdministrators, kubernetesNodes, kubeControllerManager and
 # kubeScheduler were created by ipa-kubernetes-ca.yml. Linking them to the CA #2 ACL
@@ -103,62 +40,13 @@
 # profile links survive the CA deletion), and a failed or partially skipped reset
 # can leave the chain intact.
 
-- name: Ipa-kubeclusteradm-ca | link kubeAdministrators profile to ca-acl
-  ansible.builtin.shell: |
-    set -o pipefail
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Profiles:.*kubeAdministrators"; then
-      echo "PROFILE-ALREADY-LINKED"
-    else
-      ipa caacl-add-profile {{ ipa_kubeclusteradm_ca_name }}-acl --certprofile kubeAdministrators
-      echo "PROFILE-LINKED"
-    fi
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  register: ipa_kubeclusteradm_profile_kubeadmin_link_result
-  changed_when: "'PROFILE-LINKED' in ipa_kubeclusteradm_profile_kubeadmin_link_result.stdout"
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | link kubernetesNodes profile to ca-acl
-  ansible.builtin.shell: |
-    set -o pipefail
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Profiles:.*kubernetesNodes"; then
-      echo "PROFILE-ALREADY-LINKED"
-    else
-      ipa caacl-add-profile {{ ipa_kubeclusteradm_ca_name }}-acl --certprofile kubernetesNodes
-      echo "PROFILE-LINKED"
-    fi
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  register: ipa_kubeclusteradm_profile_kubenode_link_result
-  changed_when: "'PROFILE-LINKED' in ipa_kubeclusteradm_profile_kubenode_link_result.stdout"
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | link kubeControllerManager profile to ca-acl
-  ansible.builtin.shell: |
-    set -o pipefail
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Profiles:.*kubeControllerManager"; then
-      echo "PROFILE-ALREADY-LINKED"
-    else
-      ipa caacl-add-profile {{ ipa_kubeclusteradm_ca_name }}-acl --certprofile kubeControllerManager
-      echo "PROFILE-LINKED"
-    fi
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  register: ipa_kubeclusteradm_profile_kubecm_link_result
-  changed_when: "'PROFILE-LINKED' in ipa_kubeclusteradm_profile_kubecm_link_result.stdout"
-  become: true
-
-- name: Ipa-kubeclusteradm-ca | link kubeScheduler profile to ca-acl
-  ansible.builtin.shell: |
-    set -o pipefail
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Profiles:.*kubeScheduler"; then
-      echo "PROFILE-ALREADY-LINKED"
-    else
-      ipa caacl-add-profile {{ ipa_kubeclusteradm_ca_name }}-acl --certprofile kubeScheduler
-      echo "PROFILE-LINKED"
-    fi
-  delegate_to: "{{ groups[idm_group] | first }}"
-  no_log: "{{ secure_logs }}"
-  register: ipa_kubeclusteradm_profile_kubescheduler_link_result
-  changed_when: "'PROFILE-LINKED' in ipa_kubeclusteradm_profile_kubescheduler_link_result.stdout"
-  become: true
+- name: Ipa-kubeclusteradm-ca | link profiles to the kubeclusteradm ca-acl
+  ansible.builtin.include_tasks: ipa-ca-link-profile.yml
+  loop:
+    - kubeAdministrators
+    - kubernetesNodes
+    - kubeControllerManager
+    - kubeScheduler
+  vars:
+    ipa_ca_link_acl: "{{ ipa_kubeclusteradm_ca_name }}-acl"
+    ipa_ca_link_profile: "{{ item }}"

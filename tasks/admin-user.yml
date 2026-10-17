@@ -60,7 +60,7 @@
     path: "{{ kube_credential_folder }}/kubeadm.pem"
     size: "{{ kube_credential_key_bits }}"
     type: RSA
-    mode: "0644"
+    mode: "0600"
   become: true
 
 - name: Admin-user | generate CSR for admin client certificate

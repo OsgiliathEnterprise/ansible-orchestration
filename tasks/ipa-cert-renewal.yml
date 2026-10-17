@@ -89,6 +89,7 @@
     owner: root
     group: root
     mode: "0600"
+  no_log: "{{ secure_logs }}"
   become: true
   when: kube_masters_group in group_names
 
