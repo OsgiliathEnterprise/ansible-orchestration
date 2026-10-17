@@ -1,0 +1,119 @@
+---
+# Swap the scheduler client certificate from the kubeadm CA (CA #0) to the IPA
+# kubeclusteradm CA (CA #2), mirroring the front-proxy / node-client pattern. The
+# scheduler authenticates to the API by client certificate, and its static pod mounts
+# only its conf (not the pki directory), so the cert is embedded (base64) in
+# scheduler.conf — a file reference would crash the binary at boot.
+#
+# Re-issuing under the host/<master> service principal requires the CSR's CN to equal
+# the master's hostname: IPA's host-principal check compares the CSR subject to the
+# principal's hostname, and a GID like system:kube-scheduler fails that check
+# (ipacert rejects the request). The static-subject profile kubeScheduler (created in
+# ipa-kubernetes-ca.yml) rewrites the issued subject to the exact system:masters
+# identity, so the CSR only needs to pass the host check. The cert is requested under
+# the master's host principal, so it stays renewable by the host keytab (mirroring
+# kube-cert-renew.sh).
+#
+# Idempotency: the gate extracts the embedded client certificate from scheduler.conf
+# and checks its issuer — once the conf carries a CA #2-signed cert, the whole file is
+# a no-op. The controller-manager's re-issue is gated independently in
+# ipa-controller-manager-client.yml.
+
+# --- gate: is the scheduler cert already CA #2-signed? ---
+# kubeadm embeds the client certificate in scheduler.conf (the static pod mounts only
+# its conf), so the same extraction pattern as the controller-manager gate applies.
+# (shell exception: no native module extracts an embedded client certificate from a
+# kubeconfig and reports its issuer; this is strictly read-only.)
+- name: Ipa-scheduler-client | extract scheduler client cert issuer from scheduler.conf
+  ansible.builtin.shell: |
+    set -o pipefail
+    b64=$(grep 'client-certificate-data' /etc/kubernetes/scheduler.conf | awk '{print $2}')
+    echo "$b64" | base64 -d > /tmp/scheduler-current.crt
+    if openssl x509 -in /tmp/scheduler-current.crt -noout -issuer | grep -q "{{ ipa_kubeclusteradm_ca_name }}"; then
+      echo "CA2-SIGNED"
+    else
+      echo "NOT-CA2"
+    fi
+  become: true
+  changed_when: false
+  register: scheduler_cert_issuer
+
+- name: "Ipa-scheduler-client | scheduler cert not yet CA #2-signed"
+  ansible.builtin.set_fact:
+    scheduler_swap_needed: "{{ 'NOT-CA2' in scheduler_cert_issuer.stdout }}"
+
+# --- scheduler client certificate ---
+- name: Ipa-scheduler-client | create scheduler-client private key
+  community.crypto.openssl_privatekey:
+    path: "{{ kubernetes_certificates_path }}scheduler-client.key"
+  become: true
+  when: scheduler_swap_needed
+
+- name: Ipa-scheduler-client | create scheduler-client csr
+  community.crypto.openssl_csr:
+    path: "{{ kubernetes_certificates_path }}scheduler-client.csr"
+    privatekey_path: "{{ kubernetes_certificates_path }}scheduler-client.key"
+    country_name: "{{ kube_credential_country_name }}"
+    organization_name: "system:masters"
+    # CN must be the master's hostname (host-principal check); the static-subject
+    # profile kubeScheduler rewrites the issued subject to the exact system:masters
+    # identity (D3a).
+    common_name: "{{ orchestration_host_hostname }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - clientAuth
+  become: true
+  when: scheduler_swap_needed
+
+- name: "Ipa-scheduler-client | request scheduler certificate from the kubeclusteradm CA (CA #2)"
+  freeipa.ansible_freeipa.ipacert:
+    ipaadmin_password: "{{ company_realm_password }}"
+    ca: "{{ ipa_kubeclusteradm_ca_name }}"
+    principal: "host/{{ orchestration_host_hostname }}"
+    csr_file: "{{ kubernetes_certificates_path }}scheduler-client.csr"
+    certificate_out: "{{ kubernetes_certificates_path }}scheduler-client.crt"
+    profile_id: kubeScheduler
+    state: requested
+  no_log: "{{ secure_logs }}"
+  become: true
+  when: scheduler_swap_needed
+
+# --- re-embed into the static-pod conf file ---
+# kubectl config set-credentials with --embed-certs=true reads the new cert/key and
+# embeds them (base64) into the conf, overwriting the old embedded data. The
+# scheduler's static pod mounts only its conf (not the pki directory), so file
+# references would break it.
+# (shell exception: kubectl config set-credentials writes credentials into a kubeconfig —
+# no native module for this; see the AGENTS.md shell-exception rule.)
+- name: Ipa-scheduler-client | re-embed scheduler cert into scheduler.conf
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl config set-credentials system:kube-scheduler \
+      --client-key="{{ kubernetes_certificates_path }}scheduler-client.key" \
+      --client-certificate="{{ kubernetes_certificates_path }}scheduler-client.crt" \
+      --embed-certs=true \
+      --kubeconfig=/etc/kubernetes/scheduler.conf
+  become: true
+  changed_when: true
+  when: scheduler_swap_needed
+
+# --- restart the static pod (manifest-move pattern, mirroring kube-cert-renew.sh) ---
+# The scheduler static pod reads its conf at startup; moving the manifest restarts the
+# pod, which re-reads the conf with the new embedded cert.
+# (shell exception: static-pod restart via manifest move — no native module; the renewal
+# script kube-cert-renew.sh uses this exact pattern for the kube-apiserver.)
+- name: Ipa-scheduler-client | restart scheduler static pod
+  ansible.builtin.shell: |
+    set -o pipefail
+    MANIFEST=/etc/kubernetes/manifests/kube-scheduler.yaml
+    mv "$MANIFEST" "${MANIFEST}.renewing"
+    for _ in $(seq 1 30); do
+      crictl ps --name kube-scheduler -q | grep -qv . || break
+      sleep 1
+    done
+    mv "${MANIFEST}.renewing" "$MANIFEST"
+  become: true
+  changed_when: true
+  when: scheduler_swap_needed

@@ -52,7 +52,8 @@ main.yml
 |   |-- ipa-api-server.yml
 |   |-- ipa-front-proxy.yml
 |   |-- kube-apiserver-kubelet-client.yml
-|   |-- ipa-controlplane-clients.yml
+|   |-- ipa-controller-manager-client.yml
+|   |-- ipa-scheduler-client.yml
 |-- kube-install-join-node.yml    [kube_nodes_group]
 |   |-- kube-node-cert.yml        (per-node client cert from the kubeclusteradm CA #2)
 |-- ipa-kube-admin-credential.yml [kube_masters_group; kinit]

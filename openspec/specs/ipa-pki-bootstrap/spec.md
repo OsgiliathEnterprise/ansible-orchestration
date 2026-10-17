@@ -273,7 +273,9 @@ re-issue both client certificates from the `kubeclusteradm` (CA #2) CA so they a
 the new client CA bundle. The exact `system:masters` subjects SHALL be reproduced with static
 certificate profiles (`kubeControllerManager`, `kubeScheduler`) linked to the CA #2 ACL, since
 the CSR's CN is constrained by the host-principal check and the profile rewrites the issued
-subject.
+subject. Each component's re-issue SHALL be independently gated on the issuer of the client
+certificate embedded in its own conf, so neither component's gate result SHALL skip the other
+component's re-issue.
 
 #### Scenario: Static-subject profiles are linked to the CA #2 ACL
 - **WHEN** the CA #2 ACL is linked to profiles
@@ -290,6 +292,18 @@ subject.
 #### Scenario: Client credentials are embedded for the scheduler
 - **WHEN** the re-issued client credentials are installed
 - **THEN** `controller-manager.conf` and `scheduler.conf` carry the CA #2 client certificate and key (embedded as base64 `client-certificate-data` / `client-key-data` for the scheduler static pod, which mounts only its conf), and both static pods are restarted
+
+#### Scenario: Re-issue is independently gated per component
+- **WHEN** the re-issue gate for one component runs
+- **THEN** it is decided from the issuer of the client certificate embedded in that component's own conf (`controller-manager.conf` / `scheduler.conf`), and neither component's gate result skips the other component's re-issue
+
+#### Scenario: Partial failure is repaired on re-converge
+- **WHEN** a re-converge runs and `controller-manager.conf` already carries a CA #2-signed client certificate but `scheduler.conf` still carries a CA #0-signed client certificate
+- **THEN** the controller-manager re-issue is skipped and the scheduler re-issue runs
+
+#### Scenario: Completed re-issue is skipped without churn
+- **WHEN** a re-converge runs and a component's conf already carries a CA #2-signed client certificate
+- **THEN** that component's key/CSR/cert are not regenerated, its conf is not re-embedded, and its static pod is not restarted
 
 ### Requirement: PKI swap verification runs after the admin credential re-issue
 The `ipa-pki-swap` verification tasks (controller-manager lease gate, node Ready gate) and the

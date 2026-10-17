@@ -213,8 +213,11 @@
 - name: Ipa-certs | create kubelet client certs
   ansible.builtin.include_tasks: kube-apiserver-kubelet-client.yml
 
-- name: "Ipa-certs | delegate controlplane client certs (controller-manager + scheduler) to IPA"
-  ansible.builtin.include_tasks: ipa-controlplane-clients.yml
+- name: "Ipa-certs | delegate controller-manager client cert to IPA"
+  ansible.builtin.include_tasks: ipa-controller-manager-client.yml
+
+- name: "Ipa-certs | delegate scheduler client cert to IPA"
+  ansible.builtin.include_tasks: ipa-scheduler-client.yml
 
 - name: Ipa-certs | Check SA key exists
   ansible.builtin.stat:
