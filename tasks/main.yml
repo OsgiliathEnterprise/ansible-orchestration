@@ -63,7 +63,7 @@
   when:
     - kube_masters_group in group_names
 
-- name: Create admin user (CA #2 cert + admin.conf re-embed, before pki-swap gate)
+- name: "Create admin user (CA #2 cert + admin.conf re-embed, before pki-swap gate)"
   ansible.builtin.import_tasks: admin-user.yml
   when:
     - kube_masters_group in group_names

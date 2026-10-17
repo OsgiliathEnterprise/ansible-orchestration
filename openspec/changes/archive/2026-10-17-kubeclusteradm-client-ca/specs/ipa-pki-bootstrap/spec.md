@@ -161,3 +161,41 @@ client CA bundle no longer trusts the previous (CA #0-issued) admin cert.
 #### Scenario: Admin `kubectl` verification runs after the re-embed
 - **WHEN** the `kubeclusteradm` admin credential is verified with `kubectl get nodes`
 - **THEN** the verification runs at the end of `admin-user.yml`, after the CA #2 cert has been re-embedded in `admin.conf`
+
+### Requirement: Master kubelet client cert is wired into kubelet.conf
+
+The master SHALL point `/etc/kubernetes/kubelet.conf` at the CA #2-signed
+`apiserver-kubelet-client.{crt,key}` so the master kubelet authenticates with a cert trusted by
+the two-CA client CA bundle, and SHALL restart the kubelet after the PKI swap so the post-swap
+trust anchor and client credentials take effect.
+
+#### Scenario: kubelet.conf references the CA #2-signed client cert
+- **WHEN** the kubelet client certificate is requested from CA #2
+- **THEN** `/etc/kubernetes/kubelet.conf` `client-certificate` and `client-key` point at `/etc/kubernetes/pki/apiserver-kubelet-client.{crt,key}`
+
+#### Scenario: Kubelet restarts after the swap
+- **WHEN** the PKI swap completes on the master
+- **THEN** the master's kubelet is restarted (gated on the `apiServerOverride` block change, so a re-converge does not churn it) and the master node reports Ready before the Calico data-plane recovery runs
+
+### Requirement: The master kubelet unit does not bootstrap a client cert
+
+The master kubelet unit SHALL NOT keep the kubeadm bootstrap mechanism (`--bootstrap-kubeconfig` from the
+package drop-in), because with `rotateCertificates` enabled the kubelet bootstraps a client cert signed by
+the original kubeadm CA — which the two-CA client bundle no longer trusts — leaving the master node
+`NotReady` after the swap.
+
+#### Scenario: Bootstrap drop-in removed and clean unit in place
+- **WHEN** the master's kubelet client certificate is requested from CA #2
+- **THEN** the package drop-in carrying `--bootstrap-kubeconfig` is removed and a clean drop-in runs the
+  kubelet with `/etc/kubernetes/kubelet.conf` (IPA cert) only, no bootstrap, no rotation, and a pinned
+  `--node-ip`
+
+#### Scenario: Rotation disabled and stale store removed
+- **WHEN** the bootstrap mechanism is removed
+- **THEN** `rotateCertificates` is disabled in the kubelet `config.yaml` and the stale `/var/lib/kubelet/pki`
+  store and the orphaned `bootstrap-kubelet.conf` are removed
+
+#### Scenario: Kubelet restarts only when the unit or credentials changed
+- **WHEN** the master's kubelet unit or client credentials were modified
+- **THEN** the kubelet is restarted to pick up the new unit and credentials, and a re-converge where nothing
+  changed does not restart it

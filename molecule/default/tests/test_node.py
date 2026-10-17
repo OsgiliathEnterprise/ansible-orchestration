@@ -136,7 +136,7 @@ def test_cert_renewal_forced_eligibility_extends_node_client(host):
                 break
             time.sleep(2)
     assert serial_before != serial_after, "forced eligibility must re-issue the node client cert"
-    assert 'kubeclusteradm' in issuer_after.stdout, (
-        f"renewed node client cert must be issued by the client CA (CA #2): {issuer_after.stdout!r}"
+    assert 'kubeclusteradm' in issuer_after, (
+        f"renewed node client cert must be issued by the client CA (CA #2): {issuer_after!r}"
     )
     assert 'active' in kubelet_active

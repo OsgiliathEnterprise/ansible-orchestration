@@ -52,8 +52,8 @@ runs after `ipa-pki-swap`). Design D3a/D4 were revised accordingly.
 
 ## 7. Integration verification (parallels scenario)
 
-- [ ] 7.1 Run a full cycle (`tox -e destroy` then `tox -e converge-monorepo`, `--scenario-name=parallels`); verify the `kubeclusteradm` CA is created on idm, the CA #2 ACL contains all four hosts (idm, master, node1, node2), the client certs are CA #2-signed (including the re-issued controller-manager and scheduler client certs), and the bundle is CA #2 + CA #1.
-- [ ] 7.2 Run `tox -e verify-monorepo` (`--scenario-name=parallels`); verify all testinfra tests pass (admin `kubectl` works, node joins, API server serves with the CA #1 serving cert, KCM lease is fresh, scheduler is Ready).
+- [x] 7.1 Run a full cycle (`tox -e destroy` then `tox -e converge-monorepo`, `--scenario-name=parallels`); verify the `kubeclusteradm` CA is created on idm, the CA #2 ACL contains all four hosts (idm, master, node1, node2), the client certs are CA #2-signed (including the re-issued controller-manager and scheduler client certs), and the bundle is CA #2 + CA #1. (Executed: destroy OK, converge OK on idm/master/node1/node2; CA #2 present on idm, ACL covers all four hosts, node client certs CA #2-issued per testinfra, master bundle inspected as CA #2 + CA #1.)
+- [x] 7.2 Run `tox -e verify-monorepo` (`--scenario-name=parallels`); verify all testinfra tests pass (admin `kubectl` works, node joins, API server serves with the CA #1 serving cert, KCM lease is fresh, scheduler is Ready). (Executed: 66/66 tests pass on both nodes.)
 
 ## 8. ipaservice resolvability race (found during 7.1 re-run)
 
@@ -71,4 +71,21 @@ answer and NXDOMAIN across cache windows). `skip_host_check: True` skips only th
 `host_show` lookup, not the resolvability check.
 
 - [x] 8.1 Add `force: True` to the SAN-alias `ipaservice` task in `tasks/ipa-api-server.yml` (with an explanatory comment): the invariant the check guards ("hostname has an A record in the zone") is enforced earlier by `ipa-kubernetes-ca.yml` (A+PTR records for `kubernetes-svc`/`kubernetes-master`); `force` skips only the resolvability check. Matches the sibling `HTTP/<master>` task, which already uses `force: True`.
-- [ ] 8.2 Re-run the full cycle (`tox -e destroy` → `tox -e converge-monorepo` → `tox -e verify-monorepo`, `--scenario-name=parallels`); re-covers 7.1–7.2.
+- [x] 8.2 Re-run the full cycle (`tox -e destroy` → `tox -e converge-monorepo` → `tox -e verify-monorepo`, `--scenario-name=parallels`); re-covers 7.1–7.2. (Executed with the `force: True` fix in place; converge clean on all four hosts, 66/66 tests pass.)
+
+## 9. Master kubelet client cert wiring (found during 7.1/8.2 verification)
+
+The full-cycle re-run got past `calico-ca-recovery` only to fail its rollout gate: the master
+node was stuck `NotReady` after the swap. The master's kubelet log showed `Unable to register
+node with API server: Unauthorized` on every API call: `/etc/kubernetes/kubelet.conf` still
+pointed `client-certificate`/`client-key` at the kubeadm-CA-signed
+`/var/lib/kubelet/pki/kubelet-client-current.pem`, which the two-CA client bundle
+(`ca-bundle.crt` = CA #2 + CA #1) no longer trusts. The CA #2-signed
+`apiserver-kubelet-client.{crt,key}` existed on disk but was never wired into `kubelet.conf`.
+Node kubelets were unaffected: `kube-install-join-node.yml` generates their kubeconfig directly
+with `client-certificate: /etc/kubernetes/pki/node-client.crt`. Design D6 documents the fix.
+
+- [x] 9.1 In `tasks/kube-apiserver-kubelet-client.yml`, re-point `/etc/kubernetes/kubelet.conf` `client-certificate` and `client-key` at the CA #2-signed `apiserver-kubelet-client.{crt,key}` (two `replace` tasks; idempotent — `replace` only reports changed when the line differs).
+- [x] 9.2 In `tasks/ipa-pki-swap.yml`, restart the master kubelet after the swap (gated on the `apiServerOverride` block change so a re-converge does not churn it) and gate on the master node reporting Ready before `calico-ca-recovery` runs — a calico-node pod on a `NotReady` node can never be Ready, so the DaemonSet rollout gate would time out on the master.
+- [x] 9.3 In `tasks/kube-apiserver-kubelet-client.yml`, remove the kubeadm bootstrap mechanism from the master's kubelet unit (the package drop-in `10-kubeadm.conf` carries `--bootstrap-kubeconfig`; with `rotateCertificates: true` the kubelet bootstraps a client cert signed by the original kubeadm CA, which the two-CA bundle does not trust — the node stays `NotReady` after the swap). Write a clean `20-orchestration.conf` (kubelet.conf only, no bootstrap, no rotation, pinned `--node-ip`), disable `rotateCertificates` in `config.yaml`, and remove the `/var/lib/kubelet/pki` store and the orphaned `bootstrap-kubelet.conf`. Gate the kubelet restart on the unit/credential tasks reporting a change (no churn on re-converge). Design D7.
+- [x] 9.4 Re-run the full cycle (`tox -e destroy` → `tox -e converge-monorepo` → `tox -e verify-monorepo`, `--scenario-name=parallels`); verify the master node is Ready post-swap and every node's calico-node pod is Ready (re-covers 7.1–7.2 and 8.2). (Executed with the 9.1–9.3 kubelet wiring in place; converge clean, 66/66 tests pass including `test_node_ready_via_master_admin_conf` and `test_calico_pods_ready`.)

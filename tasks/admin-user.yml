@@ -141,7 +141,7 @@
   changed_when: false
   failed_when: kube_admin_conf_cert.stdout != "{{ kube_credential_folder }}/kubeadm.crt"
 
-- name: Admin-user | verify cluster API accepts the CA #2 admin client certificate
+- name: "Admin-user | verify cluster API accepts the CA #2 admin client certificate"
   # Moved here from ipa-kube-admin-credential.yml: the API server's --client-ca-file is
   # the 2-CA bundle (CA #2 + CA #1) built in ipa-certs.yml, so it only trusts the
   # CA #2-issued kubernetes-admin cert AFTER the re-embed above. This end-to-end gate

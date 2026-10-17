@@ -37,6 +37,10 @@
   # Rolling (not mass-delete) so each node's CNI stays up while its pod is replaced one at a time.
   # The restartedAt annotation value is the current CA fingerprint, so this fires only when the CA
   # actually changed: re-converge with an unchanged CA is a no-op (no workload churn).
+  # Block-level guard makes this a true no-op when Calico is absent: without it, k8s (state:
+  # present) would try to CREATE a bare (invalid) calico-node DaemonSet and the rescue would
+  # fail the converge.
+  when: calico_node_ds.resources | length > 0
   block:
     - name: Calico-ca-recovery | patch calico-node template annotation to trigger rolling restart
       kubernetes.core.k8s:
@@ -58,7 +62,7 @@
       become: true
 
   rescue:
-    - name: Calico-ca-recovery | collect ready calico-node pods for failure report
+    - name: Calico-ca-recovery | collect calico-node pods for failure report
       kubernetes.core.k8s_info:
         api_version: v1
         kind: Pod
@@ -77,12 +81,30 @@
       become: true
       register: cluster_nodes
 
+    # Pod readiness lives in the Ready condition (status.conditions: type=Ready, status="True" —
+    # a string per the K8s API, not a boolean); there is no status.ready field, so the previous
+    # selectattr('status.ready') raised "object of type 'dict' has no attribute 'ready'".
+    - name: Calico-ca-recovery | accumulate nodes with a Ready calico-node pod
+      ansible.builtin.set_fact:
+        ready_node_names: >-
+          {{ ready_node_names | default([])
+             + ([pod.spec.nodeName]
+                if (pod.status.conditions | default([])
+                    | selectattr('type', 'equalto', 'Ready')
+                    | selectattr('status', 'equalto', 'True') | list | length) > 0
+                else []) }}
+      loop: "{{ calico_pods.resources | selectattr('spec.nodeName', 'defined') | list }}"
+      loop_control:
+        loop_var: pod
+
     - name: Calico-ca-recovery | fail naming nodes without a ready calico-node pod
       ansible.builtin.fail:
+        # Jinja has no list subtraction operator; reject('in', ...) keeps the node names lacking
+        # a Ready pod in cluster order (the difference filter is set-based and reorders).
+        # Empty result -> fallback hint.
         msg: >-
           calico-node rollout did not complete within {{ kubernetes_rollout_wait_timeout }}s;
           nodes without a Ready calico-node pod:
-          {{ ((cluster_nodes.resources | map(attribute='metadata.name') | list)
-             - (calico_pods.resources | selectattr('status.ready', 'equalto', true)
-                | selectattr('spec.nodeName', 'defined')
-                | map(attribute='spec.nodeName') | list)) or ['<all nodes covered; check calico-node pod status>'] }}
+          {{ (cluster_nodes.resources | map(attribute='metadata.name') | list
+             | reject('in', ready_node_names | default([])) | list)
+             or ['<all nodes covered; check calico-node pod status>'] }}

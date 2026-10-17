@@ -145,6 +145,43 @@ Client-auth verification path: the API server verifies each client cert against 
 (`ca-bundle.crt` = CA #2 + CA #1), so both CA #2-signed client certs and (during a transition
 window) CA #1-signed certs remain valid.
 
+### D6: Master kubelet client cert is wired into kubelet.conf (found during integration verification)
+
+The full-cycle run left the master node `NotReady` after the swap: the master's kubelet log
+showed `Unable to register node with API server: Unauthorized` on every API call.
+`/etc/kubernetes/kubelet.conf` still pointed `client-certificate`/`client-key` at the
+kubeadm-CA-signed `/var/lib/kubelet/pki/kubelet-client-current.pem`, which the two-CA client
+bundle no longer trusts. The CA #2-signed `apiserver-kubelet-client.{crt,key}` existed on disk
+but was never wired in (node kubelets are unaffected: `kube-install-join-node.yml` generates
+their kubeconfig directly with `client-certificate: /etc/kubernetes/pki/node-client.crt`).
+
+- `tasks/kube-apiserver-kubelet-client.yml` re-points `kubelet.conf` at the CA #2-signed
+  cert/key (two idempotent `replace` tasks).
+- `tasks/ipa-pki-swap.yml` restarts the master kubelet after the swap (the running kubelet pins
+  its client cert and trust anchor in memory at boot; a `notify` is too late — handlers flush at
+  end of play, after the `calico-ca-recovery` gate) and gates on the master node reporting Ready
+  before the Calico data-plane recovery: a calico-node pod on a `NotReady` node can never be
+  Ready, so the DaemonSet rollout gate would time out on the master. The restart is gated on the
+  `apiServerOverride` block change so a re-converge does not churn the kubelet.
+
+### D7: Master kubelet unit must not bootstrap a client cert (found during 9.3 verification)
+
+With the client cert wired (D6), the full-cycle re-run still left the master node `NotReady`
+after the swap: the master's kubelet unit still inherited `--bootstrap-kubeconfig` from the
+package drop-in `/usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf`. With
+`rotateCertificates: true` (the `config.yaml` default), the kubelet bootstraps a client cert
+that the controller-manager `bootstrapsigner` controller auto-approves, signed by the original
+kubeadm CA — which the post-swap client CA bundle (`ca-bundle.crt` = CA #2 + CA #1) does not
+contain. The kubelet then switches to that store cert and is `Unauthorized` on every API call.
+
+- `tasks/kube-apiserver-kubelet-client.yml` removes the `10-kubeadm.conf` drop-in and writes a
+  clean `20-orchestration.conf` (kubelet.conf (IPA cert) only, no bootstrap, no rotation,
+  `--node-ip` pinned to the master IP written by `kubeadm init`), mirroring the node drop-in.
+- It disables `rotateCertificates` in `config.yaml` (`replace`, idempotent) and removes the
+  `/var/lib/kubelet/pki` store and the orphaned `bootstrap-kubelet.conf`.
+- The kubelet restart is gated on the unit/credential tasks reporting a change, so a
+  re-converge with no changes does not churn the kubelet.
+
 ## Risks / Trade-offs
 
 - **Re-converge / existing cluster**: switching the client cert issuer from CA #1 to CA #2

@@ -241,16 +241,20 @@ def test_admin_cert_signed_by_kubeclusteradm_ca(host):
 
 def test_client_ca_bundle_is_ca2_then_ca1(host):
     """/etc/kubernetes/pki/ca-bundle.crt is the two-CA bundle consumed by --client-ca-file /
-    --root-ca-file: the kubeclusteradm CA (CA #2) first, then the kubernetes-ca CA (CA #1)."""
+    --root-ca-file: the kubeclusteradm CA (CA #2) first, then the kubernetes-ca CA (CA #1).
+
+    The CAs are distinguished by their certificate subjects (CN=kubeclusteradm /
+    CN=kubernetes-ca); both are issued by the IPA root (CN=Certificate Authority), so
+    the issuer lines are identical and cannot be used to tell them apart."""
     with host.sudo():
-        total = host.run("grep -c 'BEGIN CERTIFICATE' /etc/kubernetes/pki/ca-bundle.crt")
-        issuers = host.run(
+        total = host.run("grep -c 'BEGIN CERTIFICATE' /etc/kubernetes/pki/ca-bundle.crt").stdout
+        subjects = host.run(
             "openssl crl2pkcs7 -nocrl -certfile /etc/kubernetes/pki/ca-bundle.crt | "
-            "openssl pkcs7 -print_certs -noout | grep '^issuer='"
+            "openssl pkcs7 -print_certs -noout | grep '^subject='"
         )
     assert int(total) == 2, f"ca-bundle.crt must hold exactly 2 certs, found {total}"
-    lines = issuers.stdout.splitlines()
-    assert len(lines) == 2, f"expected 2 issuer lines, got {lines!r}"
+    lines = subjects.stdout.splitlines()
+    assert len(lines) == 2, f"expected 2 subject lines, got {lines!r}"
     assert 'kubeclusteradm' in lines[0], (
         f"first cert in bundle must be the kubeclusteradm CA (CA #2): {lines!r}"
     )
