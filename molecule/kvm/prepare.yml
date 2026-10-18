@@ -13,8 +13,8 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "ens7"
-        idm_preferred_nic: "ens7"
+        preferred_nic: "ens6"
+        idm_preferred_nic: "ens6"
         company_domain: osgiliath.test
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
@@ -32,9 +32,9 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "ens7"
+        preferred_nic: "ens6"
         company_domain: osgiliath.test
-        idm_preferred_nic: "ens7"
+        idm_preferred_nic: "ens6"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: Prepare DNS
@@ -48,9 +48,9 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "ens7"
+        preferred_nic: "ens6"
         company_domain: osgiliath.test
-        idm_preferred_nic: "ens7"
+        idm_preferred_nic: "ens6"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: Prepare NFS server on Master
@@ -64,9 +64,9 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "ens7"
+        preferred_nic: "ens6"
         company_domain: osgiliath.test
-        idm_preferred_nic: "ens7"
+        idm_preferred_nic: "ens6"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
         lvm_groups:
@@ -96,9 +96,9 @@
         secure_logs: False
         skip_hostname_assert: True # Nic name is randomized at startup
         skip_nameserver_assert: True
-        preferred_nic: "ens7"
+        preferred_nic: "ens6"
         company_domain: osgiliath.test
-        idm_preferred_nic: "ens7"
+        idm_preferred_nic: "ens6"
         company_realm_password: '123ADMin'
         company_ad_password: '123ADmPass'
 - name: configure containerization prereq # Execute master and nodes at the same time: one fact is created by the master and reused by nodes

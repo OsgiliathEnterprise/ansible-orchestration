@@ -12,9 +12,9 @@
     company_realm_password: '123ADMin'
     skip_hostname_assert: True # Nic name is randomized at startup
     skip_nameserver_assert: True
-    preferred_nic: "ens7"
-    idm_preferred_nic: "ens7"
-    master_preferred_nic: "ens7"
+    preferred_nic: "ens6"
+    idm_preferred_nic: "ens6"
+    master_preferred_nic: "ens6"
     kube_firewall_zone: 'internal'
     reset_kube: True
     nfs_mountpoints:
