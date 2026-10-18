@@ -29,6 +29,7 @@ platforms:
       cpus: 2
       memory: 2048
       qemu_use_session: false
+      mgmt_attach: false
     interfaces:
       - auto_config: true
         network_name: private_network
@@ -46,6 +47,7 @@ platforms:
       cpus: 2
       memory: 2048
       qemu_use_session: false
+      mgmt_attach: false
     interfaces:
       - auto_config: true
         network_name: private_network
@@ -62,6 +64,7 @@ platforms:
       cpus: 2
       memory: 2048
       qemu_use_session: false
+      mgmt_attach: false
     interfaces:
       - auto_config: true
         network_name: private_network
@@ -78,6 +81,7 @@ platforms:
       cpus: 2
       memory: 2048
       qemu_use_session: false
+      mgmt_attach: false
     interfaces:
       - auto_config: true
         network_name: private_network
