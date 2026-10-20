@@ -13,14 +13,23 @@ This role orchestrates a full infrastructure stack: FreeIPA server, Kubernetes m
 - **requirements-standalone.yml** - Full dependency list including local roles (`tcharl.freeipa_server`, `tcharl.ansible_securehost`, `tcharl.kubernetes`, etc.)
 - **requirements-monorepo.yml** - Minimal external roles only (geerlingguy.swap, geerlingguy.containerd, etc.). Local roles are resolved from the monorepo.
 
-## VM Topology (parallels scenario)
+## VM Topology
 
-| Host | Groups | Purpose |
-|------|--------|---------|
-| `idm.osgiliath.test` | ipaservers | FreeIPA server (5120MB RAM, +7.6GB secondary disk) |
-| `master.osgiliath.test` | ipaclients, kube_master | K8s master + IPA client (8192MB RAM) |
-| `node1.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (8192MB RAM) |
-| `node2.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (8192MB RAM) |
+| Scenario | Host | Groups | Purpose |
+|----------|------|--------|---------|
+| parallels | `idm.osgiliath.test` | ipaservers | FreeIPA server (5120MB RAM, +7.6GB secondary disk) |
+| parallels | `master.osgiliath.test` | ipaclients, kube_master | K8s master + IPA client (8192MB RAM) |
+| parallels | `node1.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (8192MB RAM) |
+| parallels | `node2.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (8192MB RAM) |
+| default | `idm.osgiliath.test` | ipaservers | FreeIPA server (2048MB RAM) |
+| default | `master.osgiliath.test` | ipaclients, kube_master | K8s master + IPA client (2048MB RAM) |
+| default | `node1.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (2048MB RAM) |
+| default | `node2.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (2048MB RAM) |
+| kvm | `idm.osgiliath.test` | ipaservers | FreeIPA server (2048MB RAM, +5G secondary disk) |
+| kvm | `master.osgiliath.test` | ipaclients, kube_master | K8s master + IPA client (2048MB RAM) |
+| kvm | `node1.osgiliath.test` | ipaclients, kube_node | K8s worker + IPA client (2048MB RAM) |
+
+The `kvm` scenario is the single-worker CI topology: it has no `node2`, and its test suite (`molecule/kvm/tests/`) links only the single-worker-safe tests — `test_two_node.py` (two-worker guard) is deliberately not linked (see Key Files).
 
 ## Task Flow (L3)
 
@@ -74,11 +83,17 @@ Admin credential ordering: `ipa-pki-swap.yml`'s verification gates (KCM lease, s
 ## Execution
 
 ```bash
-# Full cycle
+# Full cycle (parallels, two workers)
 uv tool run --python 3.13 --with tox tox -e destroy -- --scenario-name=parallels
 uv tool run --python 3.13 --with tox tox -e converge-monorepo -- --scenario-name=parallels
 # Can login to machines and inspect state here
 uv tool run --python 3.13 --with tox tox -e verify-monorepo -- --scenario-name=parallels
+
+# Single-worker cycle (kvm, Linux; the CI topology — also runnable via
+# `tox -e test-exec-monorepo -- --scenario-name=kvm`)
+uv tool run --python 3.13 --with tox tox -e destroy -- --scenario-name=kvm
+uv tool run --python 3.13 --with tox tox -e converge-monorepo -- --scenario-name=kvm
+uv tool run --python 3.13 --with tox tox -e verify-monorepo -- --scenario-name=kvm
 ```
 
 **Note for Agents**: Do not take command timeouts into consideration; wait until the end of long-running tasks.
@@ -92,4 +107,6 @@ uv tool run --python 3.13 --with tox tox -e verify-monorepo -- --scenario-name=p
 
 - `molecule/parallels/prepare.yml` - Pre-converge host preparation (IPA setup, NFS, etc.)
 - `molecule/parallels/converge.yml` - Main convergence playbook
-- `molecule/parallels/tests/test_converge.py` - Testinfra verification tests
+- `molecule/default/tests/` - Shared testinfra suite, source of truth: `conftest.py`, `test_master.py`, `test_node.py`, `test_two_node.py` (two-worker guard).
+- `molecule/kvm/tests/` - Per-file symlinks to `../../default/tests/` (`conftest.py`, `test_master.py`, `test_node.py`); `test_two_node.py` is deliberately not linked (single-worker topology). Convention: a new shared test file must also be mirrored as a per-file symlink into `kvm/tests/` in the same change — the link set is the scenario's explicit test selection.
+- `molecule/parallels/tests` - Directory symlink → `../default/tests` (full suite, includes `test_two_node.py`).
