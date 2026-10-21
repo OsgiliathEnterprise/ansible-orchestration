@@ -96,6 +96,8 @@ uv tool run --python 3.13 --with tox tox -e converge-monorepo -- --scenario-name
 uv tool run --python 3.13 --with tox tox -e verify-monorepo -- --scenario-name=kvm
 ```
 
+The `kvm` scenario overrides `kubernetes_rollout_wait_timeout` in `molecule/kvm/converge.yml` (600 vs role default 300) for the constrained single-worker CI topology; the value is calibrated from the measured calico wait duration.
+
 **Note for Agents**: Do not take command timeouts into consideration; wait until the end of long-running tasks.
 
 ## Known Issues
