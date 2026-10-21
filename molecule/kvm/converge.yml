@@ -17,6 +17,10 @@
     master_preferred_nic: "ens6"
     kube_firewall_zone: 'internal'
     reset_kube: True
+    # Constrained single-worker CI topology (2GB/2vCPU VMs on an 8GB/2vCPU runner): the
+    # calico-node and coredns rollout waits exceed the 300s role default under CI load.
+    # Calibrate: keep the budget at >=2x the measured calico wait duration.
+    kubernetes_rollout_wait_timeout: 600
     nfs_mountpoints:
       - host: idm.osgiliath.test
         mountpoints:

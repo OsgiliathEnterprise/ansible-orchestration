@@ -25,6 +25,6 @@
 ## 5. Integration verification
 
 - [x] 5.1 Run `tox -e lint` and verify yamllint, flake8, and ansible-lint all pass.
-- [ ] 5.2 Full two-worker cycle on the local host: destroy → converge → verify with `--scenario-name parallels`. Verify: the full suite (including the `test_two_node.py` guard) passes against the 4-VM stack.
+- [x] 5.2 Full two-worker cycle on the local host: destroy → converge → verify with `--scenario-name parallels`. Verify: the full suite (including the `test_two_node.py` guard) passes against the 4-VM stack. (Completed 2026-10-20: converge OK 2524s — master ok=357, node1 ok=163, node2 ok=163, failed=0; verify OK — 67 passed, `test_two_node.py::test_two_workers_present` PASSED.)
 - [ ] 5.3 Full single-worker KVM cycle (Linux host; otherwise let the Travis `master` job be the first run): destroy → converge → verify with `--scenario-name kvm`. Verify: 3 VMs converge, verify executes `test_master.py` + `test_node.py` only — verify log shows no `test_two_node.py` collection.
 - [ ] 5.4 First CI run: `uv tool run --python 3.13 --with tox tox -e test-exec-monorepo -- --scenario-name=kvm` (Travis `master` job) completes green within `travis_wait 70`. Verify: the job log shows create/prepare/converge/verify all passing with the single-worker topology.
