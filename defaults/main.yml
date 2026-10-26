@@ -39,5 +39,19 @@ kubernetes_api_ready_delay: 10
 orchestration_readiness_retries: 40
 orchestration_readiness_delay: 5
 kubernetes_rollout_wait_timeout: 300
+# updateStrategy override applied to the calico-node DaemonSet by the post-swap
+# CA-recovery patch (tasks/calico-ca-recovery.yml): the 100% default restarts all
+# calico-node pods concurrently (measured ~30s vs ~75s serial on a 3-node
+# topology); the parallels-sequential scenario overrides with "1" to exercise the
+# operator's one-at-a-time default (maxUnavailable: 1) on the same code path.
+calico_recovery_max_unavailable: "100%"
+# Budget for the all-nodes Ready gate that precedes the cluster-wide calico-node restart
+# (tasks/calico-ca-recovery.yml, design D4): in the order-tolerant play the master reaches
+# the gate while workers may still be converging (node join + kubelet start), so the budget
+# must cover the workers' remaining convergence, not just CNI initialisation. Gating first
+# bounds the post-patch rollout wait to CNI init (~30-45s parallel). 30 x 10s = 300s worst
+# case; the kvm scenario raises the retries to match its 600s rollout budget.
+calico_recovery_nodes_ready_retries: 30
+calico_recovery_nodes_ready_delay: 10
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
 vault_kube_admin_password: "KubeClusterAdm2026"

@@ -11,7 +11,8 @@
   run_once: True
   when:
    - kube_masters_group in group_names
-   - reset_kube
+   # `| bool` — same string-normalization as the main.yml gate (see there).
+   - reset_kube | bool
 
 - name: Delete | Destroying kube
   ansible.builtin.include_tasks: delete-configuration.yml

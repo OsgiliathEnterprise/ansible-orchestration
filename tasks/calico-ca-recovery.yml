@@ -8,6 +8,11 @@
 # nodes back to Ready. Runs on the master (inherited from ipa-pki-swap.yml); no-op when Calico is
 # not installed. Deliberately avoids recreating the operator: that forces an image re-pull (fragile
 # on flaky registry access) and destabilises a healthy control plane.
+#
+# The restart is preceded by an all-nodes Ready gate (design D4): a calico-node pod can only
+# reach Ready on a Ready node, so without the gate the cluster-wide rollout wait would absorb
+# the workers' still-in-progress convergence on the order-tolerant play (master and workers run
+# in one pass) and burn the rollout budget on cross-host waiting instead of CNI initialisation.
 
 - name: Calico-ca-recovery | detect calico-node DaemonSet (no-op if Calico absent)
   kubernetes.core.k8s_info:
@@ -34,7 +39,13 @@
   when: calico_node_ds.resources | length > 0
 
 - name: Calico-ca-recovery | rolling restart calico-node to re-materialise post-swap CA
-  # Rolling (not mass-delete) so each node's CNI stays up while its pod is replaced one at a time.
+  # maxUnavailable (calico_recovery_max_unavailable, default 100%, patched in the same task as
+  # the trigger annotation) overrides the operator's one-at-a-time default (maxUnavailable: 1),
+  # which serialised each new pod's ~30-45s CNI initialisation behind the previous node's
+  # (measured ~75s serial vs ~45s parallel on the 3-node topology). Concurrent replacement is
+  # safe because the CNI does not depend on the dying pod's processes (measured ~3s handoff
+  # old->new); the accepted cost is a ~10-30s per-node data-plane overlap window during a
+  # CA-triggered restart.
   # The restartedAt annotation value is the current CA fingerprint, so this fires only when the CA
   # actually changed: re-converge with an unchanged CA is a no-op (no workload churn).
   # Block-level guard makes this a true no-op when Calico is absent: without it, k8s (state:
@@ -42,6 +53,43 @@
   # fail the converge.
   when: calico_node_ds.resources | length > 0
   block:
+    - name: Calico-ca-recovery | wait for all nodes to report Ready before the cluster-wide restart
+      # Cluster-wide Node list (not a master-only query): the gate must cover the workers too.
+      # Every node must carry a Ready=True condition; nodes whose status or conditions are not
+      # (yet) populated do not count. A pod can only reach Ready on a Ready node, so gating here
+      # keeps the post-patch rollout wait bounded to CNI initialisation on the order-tolerant
+      # play, where the workers may still be converging (design D4).
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: all_nodes_ready
+      retries: "{{ calico_recovery_nodes_ready_retries }}"
+      delay: "{{ calico_recovery_nodes_ready_delay }}"
+      # Filters-only by design: Jinja2 has no list comprehensions. Counts the nodes whose
+      # Ready condition is the string "True" (same shape as the master-only gate in
+      # ipa-pki-swap.yml) and requires it to match the full node count; a node lacking
+      # status/conditions does not count.
+      until: >-
+        (all_nodes_ready.resources | length > 0) and
+        ((all_nodes_ready.resources
+           | map(attribute='status', default={})
+           | map(attribute='conditions', default=[])
+           | map('selectattr', 'type', 'equalto', 'Ready')
+           | map('selectattr', 'status', 'equalto', 'True')
+           | map('list')
+           | map('length')
+           | select('gt', 0)
+           | list | length) == (all_nodes_ready.resources | length))
+
+    - name: Calico-ca-recovery | record recovery phase reached for the failure report
+      ansible.builtin.set_fact:
+        # If the gate above times out this fact is never set and the rescue report names the
+        # gate phase; if the patch/rollout below times out it names the rollout phase.
+        calico_recovery_phase: rollout
+
     - name: Calico-ca-recovery | patch calico-node template annotation to trigger rolling restart
       kubernetes.core.k8s:
         api_version: apps/v1
@@ -59,6 +107,10 @@
               metadata:
                 annotations:
                   restartedAt: "ca-{{ calico_ca_fingerprint }}"
+            updateStrategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxUnavailable: "{{ calico_recovery_max_unavailable }}"
       become: true
 
   rescue:
@@ -81,6 +133,31 @@
       become: true
       register: cluster_nodes
 
+    # Generation state distinguishes controller lag (observedGeneration behind generation: the
+    # patch never reached the controller) from pods stuck mid-CNI-initialisation.
+    - name: Calico-ca-recovery | collect calico-node DaemonSet generation state for failure report
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: DaemonSet
+        namespace: calico-system
+        name: calico-node
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_ds_info
+
+    # Events are namespaced with a ~1h TTL, far longer than the timeout-to-fail window, so the
+    # most recent event per pod is available at failure time.
+    - name: Calico-ca-recovery | collect calico-system events for failure report
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Event
+        namespace: calico-system
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_events
+
     # Pod readiness lives in the Ready condition (status.conditions: type=Ready, status="True" —
     # a string per the K8s API, not a boolean); there is no status.ready field, so the previous
     # selectattr('status.ready') raised "object of type 'dict' has no attribute 'ready'".
@@ -97,14 +174,78 @@
       loop_control:
         loop_var: pod
 
+    # Opposite of the Ready condition above; kept as full pod objects so the failure report can
+    # name phase and Ready-condition detail per pod.
+    - name: Calico-ca-recovery | accumulate non-Ready calico-node pods
+      ansible.builtin.set_fact:
+        not_ready_pods: >-
+          {{ not_ready_pods | default([])
+             + ([pod]
+                if (pod.status.conditions | default([])
+                    | selectattr('type', 'equalto', 'Ready')
+                    | selectattr('status', 'equalto', 'True') | list | length) == 0
+                else []) }}
+      loop: "{{ calico_pods.resources | default([]) }}"
+      loop_control:
+        loop_var: pod
+
+    # One evidence line per non-Ready pod: node, phase, Ready-condition message, most recent
+    # event reason + message. Single namespace-wide event list (1 API call, no per-pod
+    # fieldSelector round-trip) filtered in memory by involvedObject.name; lastTimestamp
+    # still populated on K8s 1.36 despite deprecation (verified on the live cluster).
+    - name: Calico-ca-recovery | per-pod evidence for non-Ready calico-node pods
+      ansible.builtin.set_fact:
+        calico_pod_evidence: >-
+          {{ calico_pod_evidence | default([])
+             + ([pod.metadata.name ~ ' (node ' ~ (pod.spec.nodeName | default('<unscheduled>'))
+                ~ ', phase ' ~ (pod.status.phase | default('<unknown>'))
+                ~ ', ready: ' ~ (pod.status.conditions | default([])
+                   | selectattr('type', 'equalto', 'Ready')
+                   | map(attribute='message') | first
+                   | default('<no Ready condition>'))
+                ~ ', last event: '
+                ~ ((calico_events.resources | default([]))
+                    | selectattr('involvedObject.name', 'equalto', pod.metadata.name)
+                    | sort(attribute='lastTimestamp', reverse=true) | list
+                    | first | default({})).reason | default('<none>')
+                ~ ' '
+                ~ ((calico_events.resources | default([]))
+                    | selectattr('involvedObject.name', 'equalto', pod.metadata.name)
+                    | sort(attribute='lastTimestamp', reverse=true) | list
+                    | first | default({})).message | default('')
+                ~ ')']) }}
+      loop: "{{ not_ready_pods | default([]) }}"
+      loop_control:
+        loop_var: pod
+
+    - name: Calico-ca-recovery | calico-node DaemonSet generation state
+      ansible.builtin.set_fact:
+        calico_ds_state:
+          generation: "{{ (calico_ds_info.resources | first | default({})).metadata.generation | default('<unknown>') }}"
+          observedGeneration: "{{ (calico_ds_info.resources | first | default({})).status.observedGeneration | default('<unknown>') }}"
+          desired: "{{ (calico_ds_info.resources | first | default({})).status.desiredNumberScheduled | default('<unknown>') }}"
+          updated: "{{ (calico_ds_info.resources | first | default({})).status.updatedNumberScheduled | default('<unknown>') }}"
+          ready: "{{ (calico_ds_info.resources | first | default({})).status.numberReady | default('<unknown>') }}"
+
     - name: Calico-ca-recovery | fail naming nodes without a ready calico-node pod
       ansible.builtin.fail:
         # Jinja has no list subtraction operator; reject('in', ...) keeps the node names lacking
         # a Ready pod in cluster order (the difference filter is set-based and reorders).
-        # Empty result -> fallback hint.
+        # Empty result -> fallback hint. The phase names the budget that was exhausted: the
+        # all-nodes Ready gate (calico_recovery_nodes_ready_retries x ..._delay) when the fact
+        # was never set, the rollout wait (kubernetes_rollout_wait_timeout) once set.
         msg: >-
-          calico-node rollout did not complete within {{ kubernetes_rollout_wait_timeout }}s;
+          calico-node CA recovery did not complete (phase:
+          {{ calico_recovery_phase | default('all-nodes Ready gate') }});
           nodes without a Ready calico-node pod:
           {{ (cluster_nodes.resources | map(attribute='metadata.name') | list
              | reject('in', ready_node_names | default([])) | list)
-             or ['<all nodes covered; check calico-node pod status>'] }}
+             or ['<all nodes covered; check calico-node pod status>'] }};
+          DaemonSet calico-node: generation={{ calico_ds_state.generation }},
+          observedGeneration={{ calico_ds_state.observedGeneration }},
+          desired={{ calico_ds_state.desired }},
+          updated={{ calico_ds_state.updated }},
+          ready={{ calico_ds_state.ready }};
+          per-pod evidence:
+          {{ (calico_pod_evidence | default([]) | join(' | '))
+             or '<all pods Ready or unscheduled>' }}

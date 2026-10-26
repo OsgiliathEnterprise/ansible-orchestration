@@ -21,6 +21,9 @@
     # calico-node and coredns rollout waits exceed the 300s role default under CI load.
     # Calibrate: keep the budget at >=2x the measured calico wait duration.
     kubernetes_rollout_wait_timeout: 600
+    # The all-nodes Ready gate (tasks/calico-ca-recovery.yml, design D4) must cover the worker's
+    # remaining convergence on the shared 2vCPU runner; match the rollout budget above (60 x 10s).
+    calico_recovery_nodes_ready_retries: 60
     nfs_mountpoints:
       - host: idm.osgiliath.test
         mountpoints:

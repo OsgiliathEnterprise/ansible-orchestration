@@ -96,6 +96,10 @@ uv tool run --python 3.13 --with tox tox -e converge-monorepo -- --scenario-name
 uv tool run --python 3.13 --with tox tox -e verify-monorepo -- --scenario-name=kvm
 ```
 
+The `verify` step is mandatory after a successful converge — it is the gate that proves the
+recovery (all nodes Ready, per-pod evidence, PV mounts) actually took effect, not merely
+that converge exited 0.
+
 The `kvm` scenario overrides `kubernetes_rollout_wait_timeout` in `molecule/kvm/converge.yml` (600 vs role default 300) for the constrained single-worker CI topology; the value is calibrated from the measured calico wait duration.
 
 **Note for Agents**: Do not take command timeouts into consideration; wait until the end of long-running tasks.
@@ -112,3 +116,4 @@ The `kvm` scenario overrides `kubernetes_rollout_wait_timeout` in `molecule/kvm/
 - `molecule/default/tests/` - Shared testinfra suite, source of truth: `conftest.py`, `test_master.py`, `test_node.py`, `test_two_node.py` (two-worker guard).
 - `molecule/kvm/tests/` - Per-file symlinks to `../../default/tests/` (`conftest.py`, `test_master.py`, `test_node.py`); `test_two_node.py` is deliberately not linked (single-worker topology). Convention: a new shared test file must also be mirrored as a per-file symlink into `kvm/tests/` in the same change — the link set is the scenario's explicit test selection.
 - `molecule/parallels/tests` - Directory symlink → `../default/tests` (full suite, includes `test_two_node.py`).
+- `molecule/parallels-sequential/` - Scenario override verifying the serial recovery path (`calico_recovery_max_unavailable: 1` in `converge.yml`); reuses `parallels` prepare (shared VM topology).
