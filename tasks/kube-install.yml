@@ -1,12 +1,25 @@
 ---
 
+- name: Kube-install | Check if the control plane is already initialized on master
+  ansible.builtin.stat:
+    path: "{{ kube_config_path }}"
+  when: kube_masters_group in group_names
+  register: kube_init_stat
+
 - name: Kube-install | Clean PKI directory before kubeadm init on master
+  # Only clean when the cluster is NOT initialized: tcharl.kubernetes skips
+  # `kubeadm init` when admin.conf exists, so on a re-converge of a live
+  # cluster a wiped /etc/kubernetes/pki leaves admin.conf's
+  # certificate-authority dangling and the coredns restart task (and every
+  # other admin.conf-authenticated task) fails to trust the API server.
+  # A broken PKI on an initialized master is recovered with reset_kube: True.
   ansible.builtin.file:
     path: "{{ kubernetes_certificates_path }}"
     state: absent
   become: true
   when:
     - kube_masters_group in group_names
+    - not (kube_init_stat.stat.exists | default(false))
 
 - name: Kube-install | Create kubernetes configuration directory
   ansible.builtin.file:

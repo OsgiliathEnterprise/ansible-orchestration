@@ -57,12 +57,22 @@
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
+  # Gate on usability (kinit), not file presence: a stale keytab (the KDB key
+  # rotated out from under it) must trigger a regeneration, which a mere file
+  # check would not. `ipa-getkeytab` rotates the principal key as a documented
+  # side effect — so after generation the managed password is dead by design
+  # and the keytab itself is the steady-state credential (see
+  # ipa-kube-admin-credential.yml).
   ansible.builtin.shell: |
     set -o pipefail
-    if klist -kte /tmp/kubeclusteradm.keytab 2>/dev/null | grep -q "kubeclusteradm@"; then
-      echo "KEYTAB-PRESENT"
+    if kinit -kt /tmp/kubeclusteradm.keytab 2>/dev/null; then
+      echo "KEYTAB-USABLE"
     else
       echo '{{ company_realm_password }}' | kinit admin > /dev/null
+      # rm first: ipa-getkeytab (ktadd) APPENDS entries, so a stale entry left
+      # at the top of the file would shadow the fresh one (kinit uses the first
+      # matching entry) — the file must hold exactly the current key.
+      rm -f /tmp/kubeclusteradm.keytab
       ipa-getkeytab -p kubeclusteradm@{{ company_domain | upper }} -k /tmp/kubeclusteradm.keytab
       echo "KEYTAB-GENERATED"
     fi

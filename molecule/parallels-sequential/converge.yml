@@ -1,0 +1,37 @@
+---
+# parallels-sequential scenario — Calico CA recovery in SERIAL mode.
+#
+# Same environment as `parallels`, but with calico_recovery_max_unavailable="1":
+# the role's Calico pod restart (tasks/ipa-pki-swap.yml) must run pod-by-pod,
+# waiting for each pod to be ready before moving to the next (the serial
+# recovery path). The default `parallels` scenario exercises the parallel path
+# (calico_recovery_max_unavailable="100%").
+#
+# No extra gates here: the kubernetesNodes profile gate (molecule/parallels/
+# converge.yml) is deliberately omitted — the profile is created BY the role
+# during converge (tasks/ipa-certs.yml), so a pre-role gate on a fresh
+# converge would deadlock; the role's own kube-install-join-node.yml gates on
+# the profile at the right moment.
+
+- name: Converge cluster serially
+  hosts: kube_master,kube_node
+  vars:
+    secure_logs: False
+    standalone_role: False
+    company_domain: osgiliath.test
+    company_realm_password: '123ADMin'
+    preferred_nic: "enp0s5"
+    idm_preferred_nic: "enp0s5"
+    master_preferred_nic: "enp0s5"
+    reset_kube: True
+    calico_recovery_max_unavailable: "1"
+    nfs_mountpoints:
+      - host: idm.osgiliath.test
+        mountpoints:
+          - local: /net
+            remote: /var/nfs/volume
+            kubernetes_volumes:
+              - subtree: /artefactrepo
+                mountsize: 1
+  roles:
+    - role: tcharl.ansible_orchestration

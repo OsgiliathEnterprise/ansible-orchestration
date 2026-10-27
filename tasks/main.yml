@@ -3,8 +3,12 @@
 
 - name: Drain kube
   ansible.builtin.include_tasks: delete.yml
+  # `| bool` normalizes string encodings: `-e reset_kube=false` arrives as the
+  # string "false", which is truthy in a bare `when:` clause and would run the
+  # destructive reset path when the caller meant the opposite. (A set_fact
+  # cannot fix this — extra-vars shadow facts in Ansible precedence.)
   when:
-   - reset_kube
+   - reset_kube | bool
 
 - name: Requirements
   ansible.builtin.import_tasks: requirements.yml
