@@ -1,11 +1,6 @@
 ---
 roles:
   # Install a role from Ansible Galaxy.
-  - name: tcharl.kubernetes
-  - name: geerlingguy.swap
-  - name: geerlingguy.containerd
-  - name: tcharl.ansible_volumes
-  - name: mrlesmithjr.manage_lvm
   - name: tcharl.ansible_hostname
   - name: robertdebock.bootstrap
   - name: robertdebock.environment
@@ -20,5 +15,3 @@ roles:
   - name: tcharl.freeipa_server
   - name: tcharl.ansible_securehost
   - name: tcharl.ansible_nameserver
-  - name: tcharl.nfs_server
-  - name: tcharl.nfs_client

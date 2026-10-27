@@ -13,70 +13,25 @@
 # converge would deadlock; the role's own kube-install-join-node.yml gates on
 # the profile at the right moment.
 
-- name: Converge (serial Calico CA recovery)
-  hosts: all
-  pre_tasks:
-    - name: Ensure FreeIPA server is up and running (retried)
-      ansible.builtin.command: ipactl status
-      register: ipa_status
-      until: ipa_status is succeeded
-      retries: 10
-      delay: 15
-      become: true
-      tags:
-        - ipa
-      when: ansible_facts['hostname'] == 'idm.osgiliath.test'
-
-    - name: Wait for FreeIPA service (all hosts)
-      ansible.builtin.wait_for:
-        host: idm.osgiliath.test
-        port: 443
-        timeout: 300
-      delegate_to: localhost
-      tags:
-        - ipa
-
-    - name: Wait for NFS share to be available
-      ansible.builtin.wait_for:
-        path: /nfs
-        state: directory
-        timeout: 300
-      delegate_to: localhost
-      tags:
-        - nfs
-
-  tasks:
-    - name: Include ansible_orchestration role (serial Calico recovery)
-      ansible.builtin.include_role:
-        name: tcharl.ansible_orchestration
-      vars:
-        calico_recovery_max_unavailable: "1"
-
-  post_tasks:
-    - name: Check for Kubernetes Nodes
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: Node
-        host: "https://master.osgiliath.test:6443"
-        verify_ssl: false
-        kubeconfig: /etc/kubernetes/admin.conf
-      become: true
-      delegate_to: master.osgiliath.test
-      register: nodes
-      retries: 10
-      delay: 10
-      until: nodes is succeeded
-
-    - name: Assert that all Kubernetes nodes are present
-      ansible.builtin.assert:
-        that:
-          - nodes.api_resources | length == 4
-          - nodes.api_resources[0].status == 'Ready'
-          - nodes.api_resources[1].status == 'Ready'
-          - nodes.api_resources[2].status == 'Ready'
-          - nodes.api_resources[3].status == 'Ready'
-        fail_msg: "Not all Kubernetes nodes are Ready"
-        success_msg: "All Kubernetes nodes are Ready"
-      become: true
-      delegate_to: master.osgiliath.test
-      when: nodes is succeeded
+- name: Converge cluster serially
+  hosts: kube_master,kube_node
+  vars:
+    secure_logs: False
+    standalone_role: False
+    company_domain: osgiliath.test
+    company_realm_password: '123ADMin'
+    preferred_nic: "enp0s5"
+    idm_preferred_nic: "enp0s5"
+    master_preferred_nic: "enp0s5"
+    reset_kube: True
+    calico_recovery_max_unavailable: "1"
+    nfs_mountpoints:
+      - host: idm.osgiliath.test
+        mountpoints:
+          - local: /net
+            remote: /var/nfs/volume
+            kubernetes_volumes:
+              - subtree: /artefactrepo
+                mountsize: 1
+  roles:
+    - role: tcharl.ansible_orchestration

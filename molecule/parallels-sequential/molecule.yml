@@ -41,8 +41,9 @@ platforms:
       cpus: 4
       memory: 8192
     networks:
-      - network: private_network
-        ip: 10.211.55.11
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
     groups:
       - ipaclients
       - kube_master
@@ -52,8 +53,9 @@ platforms:
       cpus: 4
       memory: 8192
     networks:
-      - network: private_network
-        ip: 10.211.55.12
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
     groups:
       - ipaclients
       - kube_node
@@ -63,8 +65,9 @@ platforms:
       cpus: 4
       memory: 8192
     networks:
-      - network: private_network
-        ip: 10.211.55.13
+      - type: dhcp
+        auto_config: true
+        network_name: private_network
     groups:
       - ipaclients
       - kube_node
