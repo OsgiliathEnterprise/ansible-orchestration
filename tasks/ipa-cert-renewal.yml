@@ -20,40 +20,26 @@
   no_log: "{{ secure_logs }}"
   when: kube_masters_group in group_names
 
+# Host grants run before the renewal script is deployed (below): the script
+# authenticates as the host principal and the kubeclusteradm user, so their
+# ACL membership must exist before the first unattended tick. The
+# check-then-add pattern lives in the shared include (single source of
+# truth; see tasks/ipa-ca-acl-host.yml).
+
 - name: Ipa-cert-renewal | Grant kubernetes-ca access to all kube hosts (host-principal renewal)
-  ansible.builtin.shell: |
-    set -o pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    if ipa caacl-show kubernetes-ca-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
-      echo "ACL-GRANT-PRESENT"
-    else
-      ipa caacl-add-host kubernetes-ca-acl --hosts={{ item }}
-      echo "ACL-GRANT-ADDED"
-    fi
+  ansible.builtin.include_tasks: ipa-ca-acl-host.yml
   loop: "{{ groups[kube_masters_group] + groups[kube_nodes_group] }}"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-  register: caacl_grant_result
-  changed_when: "'ACL-GRANT-ADDED' in caacl_grant_result.stdout"
+  vars:
+    ipa_ca_acl_name: "kubernetes-ca-acl"
+    ipa_ca_acl_host: "{{ item }}"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Grant kubeclusteradm CA access to all hosts (host-principal renewal)
-  ansible.builtin.shell: |
-    set -o pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
-      echo "ACL-GRANT-PRESENT"
-    else
-      ipa caacl-add-host {{ ipa_kubeclusteradm_ca_name }}-acl --hosts={{ item }}
-      echo "ACL-GRANT-ADDED"
-    fi
+  ansible.builtin.include_tasks: ipa-ca-acl-host.yml
   loop: "{{ groups[idm_group] + groups[kube_masters_group] + groups[kube_nodes_group] }}"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-  register: caacl_kubeclusteradm_grant_result
-  changed_when: "'ACL-GRANT-ADDED' in caacl_kubeclusteradm_grant_result.stdout"
+  vars:
+    ipa_ca_acl_name: "{{ ipa_kubeclusteradm_ca_name }}-acl"
+    ipa_ca_acl_host: "{{ item }}"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
