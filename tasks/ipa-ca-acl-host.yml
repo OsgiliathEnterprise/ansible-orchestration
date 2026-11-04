@@ -10,14 +10,15 @@
 #   ipa_ca_acl_name:  CA ACL name (e.g. `kubernetes-ca-acl` or `{{ ca_name }}-acl`).
 #   ipa_ca_acl_host:  host to grant (exact inventory host name).
 #
-# The delegated idm session authenticates with a fresh admin ticket (self-contained;
-# no ambient ticket cache is assumed), matching the house pattern for delegated `ipa`
-# administration. Requires `company_realm_password` (admin password) in scope.
+# Authentication: the delegated idm session consumes the scratch admin ticket
+# at /tmp/.renewal_admin.ccache via environment: KRB5CCNAME — the sole caller,
+# ipa-cert-renewal.yml, mints it fresh (pre-cleared, from
+# company_realm_password) before the loops that include this file. The include
+# therefore must not be called without that ticket in place.
 
 - name: "Ipa-ca-acl-host | ensure host membership in acl {{ ipa_ca_acl_name }}"
   ansible.builtin.shell: |
     set -o pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
     if ipa caacl-show {{ ipa_ca_acl_name }} --all | grep -q "^ *Hosts:.*{{ ipa_ca_acl_host }}"; then
       echo "ACL-GRANT-PRESENT"
     else
@@ -29,3 +30,5 @@
   no_log: "{{ secure_logs }}"
   register: ipa_ca_acl_host_result
   changed_when: "'ACL-GRANT-ADDED' in ipa_ca_acl_host_result.stdout"
+  environment:
+    KRB5CCNAME: /tmp/.renewal_admin.ccache

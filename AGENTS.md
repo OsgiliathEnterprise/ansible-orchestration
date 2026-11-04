@@ -65,7 +65,7 @@ main.yml
 |   |-- ipa-scheduler-client.yml
 |-- kube-install-join-node.yml    [kube_nodes_group]
 |   |-- kube-node-cert.yml        (per-node client cert from the kubeclusteradm CA #2)
-|-- ipa-kube-admin-credential.yml [kube_masters_group; kinit]
+|-- ipa-kube-admin-credential.yml [kube_masters_group; keytab-first + password fallback]
 |-- admin-user.yml                [kube_masters_group; CA #2 cert + admin.conf re-embed + kubectl get nodes verification]
 |-- ipa-pki-swap.yml              [kube_masters_group]
 |   |-- calico-ca-recovery.yml    (no-op when Calico is not installed)
@@ -79,6 +79,15 @@ main.yml
 Node join is intentionally deferred: `kube-install.yml` on nodes only installs packages (join disabled via `kubernetes_join_command: ""`). `kube-install-join-node.yml` runs after master's `ipa-certs.yml` — which has already swapped the API server to an IPA-signed serving certificate — but before `ipa-pki-swap.yml`. The node fetches its trust anchor directly from FreeIPA (delegated to idm), gates on the kubernetesNodes profile existing, and only joins once the API validates against that anchor; it no longer depends on master post-processing state.
 
 Admin credential ordering: `ipa-pki-swap.yml`'s verification gates (KCM lease, scheduler Ready, kubectl) authenticate with `admin.conf`, whose client certificate must be the CA #2-issued one to be trusted by the 2-CA bundle (the kubeadm CA was dropped from it). `admin-user.yml` therefore runs before `ipa-pki-swap.yml`, and the end-to-end `kubectl get nodes` verification runs at the end of `admin-user.yml` (after `admin.conf` is re-embedded), not in `ipa-kube-admin-credential.yml`.
+
+## Kerberos Ticketing
+
+This role never uses shell `kinit` or the ambient per-user ticket cache (`~/.k5.<user>`):
+
+- **Scratch caches** — ticket acquisition is a `community.general.krb_ticket` task into a per-purpose scratch cache under `/tmp` (pre-cleared first, so a stale/expired ticket can never be reused). Downstream `ipa` consumers — including idm-delegated ones — inherit the cache via `env: KRB5CCNAME`.
+- **Keytab usability probes** — keytab-first flows probe with a block/rescue `krb_ticket` into a scratch cache (`kca_keytab_usable`); a rotated keytab fails the probe and the flow falls back to the admin password.
+- **Native keytab export** — the `kubeclusteradm` keytab is exported with `community.general.ipa_getkeytab` (LDAP bind via `bind_dn`/`bind_pw`, `force: true`) — no ticket needed, replace-not-append.
+- Ticket tasks report no change (the scratch cache is ephemeral state, not configuration).
 
 ## Execution
 
@@ -107,6 +116,7 @@ The `kvm` scenario overrides `kubernetes_rollout_wait_timeout` in `molecule/kvm/
 ## Known Issues
 
 - IPA server can fail to start if LDAP data is stale from previous runs. The prepare phase includes cleanup steps to handle this.
+- A converge killed during the FreeIPA install leaves `/var/lib/pki/pki-tomcat`, `/var/lib/ipa`, and DS residues that make every later install die in pkispawn (`--uninstall` at stage CREATED does not remove them). Recover by uninstalling, wiping those residues, then verifying package integrity with `rpm -V` on all `dogtag-pki*` packages and restoring any `missing` RPM paths — do **not** remove RPM-owned systemd state (`pki-tomcatd.target.wants`) or `/var/log/pki`, pkispawn assumes both exist. Or simply destroy the VMs instead.
 - Converge can take 5-15 minutes depending on IPA installation speed.
 
 ## Key Files

@@ -1,9 +1,23 @@
 ---
 
-- name: Ipa-kubernetes-ca | ensure Kerberos ticket is valid
-  ansible.builtin.shell: |
-    set -euo pipefail
-    echo '{{ company_realm_password }}' | kinit admin
+# Scratch admin ticket for the CA chain: every shell `ipa` task in the
+# included files (ipa-ca-ensure.yml, ipa-ca-profile.yml,
+# ipa-ca-link-profile.yml — also used by ipa-kubeclusteradm-ca.yml, which runs
+# after this file in the same converge) is delegated to idm and authenticates
+# with this cache via env: KRB5CCNAME. Pre-cleared so a stale/expired ticket
+# is never reused; changed_when: false — the scratch cache is ephemeral state.
+- name: Ipa-kubernetes-ca | pre-clear admin ticket scratch cache
+  ansible.builtin.file:
+    path: /tmp/.ipa_k8s_ca_admin.ccache
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
+- name: Ipa-kubernetes-ca | acquire admin ticket into scratch cache
+  community.general.krb_ticket:
+    principal: admin
+    password: "{{ company_realm_password }}"
+    cache_name: /tmp/.ipa_k8s_ca_admin.ccache
   delegate_to: "{{ groups[idm_group] | first }}"
   changed_when: false
   become: true

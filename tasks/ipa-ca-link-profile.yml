@@ -5,6 +5,10 @@
 #   ipa_ca_link_acl:     CA ACL name.
 #   ipa_ca_link_profile: certificate profile id.
 #
+# Authentication: the task below is delegated to idm and consumes the scratch
+# admin ticket at /tmp/.ipa_k8s_ca_admin.ccache (minted fresh by
+# ipa-kubernetes-ca.yml before this chain runs) via env: KRB5CCNAME.
+#
 # `ipa caacl-add-profile` is NOT idempotent (rc=1 "This entry is already a member"),
 # so membership is checked read-only first (`caacl-show --all` Profiles: line).
 
@@ -22,3 +26,5 @@
   no_log: "{{ secure_logs }}"
   changed_when: "'PROFILE-LINKED' in ipa_ca_link_result.stdout"
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache

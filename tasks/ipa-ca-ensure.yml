@@ -4,6 +4,10 @@
 # Inputs (include vars):
 #   ipa_ca_ensure_name: lightweight CA name; the ACL is named "<name>-acl".
 #
+# Authentication: every task below is delegated to idm and consumes the
+# scratch admin ticket at /tmp/.ipa_k8s_ca_admin.ccache (minted fresh by
+# ipa-kubernetes-ca.yml before this chain runs) via env: KRB5CCNAME.
+#
 # `ipa <x>-show` exits rc=2 (NOT_FOUND) when the object is absent; any other
 # non-zero rc is a real failure. `ipa caacl-add-ca` is NOT idempotent (rc=1 "This
 # entry is already a member"), so membership is checked read-only first.
@@ -16,6 +20,8 @@
   failed_when: ipa_ca_ensure_ca.rc not in [0, 2]
   changed_when: false
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
 - name: "Ipa-ca-ensure | create lightweight ca: {{ ipa_ca_ensure_name }}"
   ansible.builtin.command: >-
@@ -26,6 +32,8 @@
   no_log: "{{ secure_logs }}"
   changed_when: true
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
 - name: "Ipa-ca-ensure | check if ca acl exists: {{ ipa_ca_ensure_name }}"
   ansible.builtin.command: "ipa caacl-show {{ ipa_ca_ensure_name }}-acl"
@@ -35,6 +43,8 @@
   failed_when: ipa_ca_ensure_acl.rc not in [0, 2]
   changed_when: false
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
 - name: "Ipa-ca-ensure | create ca access list: {{ ipa_ca_ensure_name }}"
   ansible.builtin.command: "ipa caacl-add {{ ipa_ca_ensure_name }}-acl --usercat=all"
@@ -43,6 +53,8 @@
   no_log: "{{ secure_logs }}"
   changed_when: true
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
 # The ACL persists across destroy (delete-ipa-cleanup.yml keeps it and only
 # deletes CA #2), so the ACL may exist while the recreated CA is not a member.
@@ -60,3 +72,5 @@
   no_log: "{{ secure_logs }}"
   changed_when: "'CA-ACL-ADDED' in ipa_ca_ensure_acl_add.stdout"
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache

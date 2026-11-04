@@ -123,7 +123,7 @@
         extraArgs:
           - name: authorization-mode
             value: Node,RBAC
-      controlPlaneEndpoint: "{{ orchestration_host_hostname }}:6443"
+      controlPlaneEndpoint: "{{ orchestration_host_hostname }}:{{ orchestration_kube_port }}"
     kubernetes_config_kubelet_configuration:
       cgroupDriver: systemd
       resolvConf: /run/systemd/resolve/resolv.conf

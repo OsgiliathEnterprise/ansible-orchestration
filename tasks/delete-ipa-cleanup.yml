@@ -1,4 +1,26 @@
 ---
+# Scratch admin ticket for the five idm-delegated `ipa` tasks below (CA check,
+# ACL check, unlink, disable, delete): they authenticate with this cache via
+# env: KRB5CCNAME instead of an in-shell `kinit admin` into the shared ambient
+# cache. Pre-cleared so a stale/expired ticket is never reused; changed_when:
+# false — the scratch cache is ephemeral state.
+- name: Delete-ipa-cleanup | pre-clear admin ticket scratch cache
+  ansible.builtin.file:
+    path: /tmp/.cleanup_admin.ccache
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
+- name: Delete-ipa-cleanup | acquire admin ticket into scratch cache
+  community.general.krb_ticket:
+    principal: admin
+    password: "{{ company_realm_password }}"
+    cache_name: /tmp/.cleanup_admin.ccache
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+
 - name: Delete-ipa-cleanup | Check admin cert existence
   ansible.builtin.stat:
     path: "{{ kube_credential_folder }}/kubeadm.crt"
@@ -114,8 +136,9 @@
   # truthful; `|| true` keeps the task green when the CA is absent.
   ansible.builtin.shell: |
     set -euo pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
     ipa ca-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}' || true
+  environment:
+    KRB5CCNAME: /tmp/.cleanup_admin.ccache
   register: _cleanup_kubeclusteradm_ca_exists
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
@@ -127,10 +150,12 @@
   # Same shell rationale as the CA existence check above (no CA-ACL module in
   # the installed freeipa.ansible_freeipa). Strictly read-only: `changed_when:
   # false` is truthful; `|| true` keeps the task green when the ACL is absent.
-  # The ACL check reuses the admin ticket established by the CA check's kinit.
+  # Authenticates with the scratch admin ticket at the top of this file.
   ansible.builtin.shell: |
     set -o pipefail
     ipa caacl-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}-acl' || true
+  environment:
+    KRB5CCNAME: /tmp/.cleanup_admin.ccache
   register: _cleanup_kubeclusteradm_ca_acl_exists
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
@@ -154,6 +179,8 @@
     else
       echo "CA-NOT-LINKED"
     fi
+  environment:
+    KRB5CCNAME: /tmp/.cleanup_admin.ccache
   when:
     - _cleanup_kubeclusteradm_ca_exists.stdout == '1'
     - _cleanup_kubeclusteradm_ca_acl_exists.stdout == '1'
@@ -171,6 +198,8 @@
   ansible.builtin.shell: |
     set -o pipefail
     ipa ca-disable {{ ipa_kubeclusteradm_ca_name }}
+  environment:
+    KRB5CCNAME: /tmp/.cleanup_admin.ccache
   when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
   register: _cleanup_kubeclusteradm_ca_disable
   delegate_to: "{{ groups[idm_group] | first }}"
@@ -189,6 +218,8 @@
   ansible.builtin.shell: |
     set -o pipefail
     ipa ca-del {{ ipa_kubeclusteradm_ca_name }}
+  environment:
+    KRB5CCNAME: /tmp/.cleanup_admin.ccache
   when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
   register: _cleanup_kubeclusteradm_ca_del
   delegate_to: "{{ groups[idm_group] | first }}"

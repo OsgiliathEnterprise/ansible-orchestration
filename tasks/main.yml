@@ -56,7 +56,7 @@
   when:
     - kube_nodes_group in group_names
 
-# The admin credential (IPA user + kinit) and the CA #2 admin client cert
+# The admin credential (IPA user + ticket) and the CA #2 admin client cert
 # (admin-user.yml) must exist BEFORE ipa-pki-swap.yml: the pki-swap verification
 # gates (KCM lease, scheduler Ready, kubectl) authenticate with admin.conf, whose
 # client cert must be the CA #2-issued one to be trusted by the 2-CA bundle (the

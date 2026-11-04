@@ -11,6 +11,10 @@
 #                           to the .cfg (lineinfile semantics).
 #
 # `ipa certprofile-show` exits rc=2 (NOT_FOUND) when the profile is absent.
+#
+# Authentication: every `ipa` task below is delegated to idm and consumes the
+# scratch admin ticket at /tmp/.ipa_k8s_ca_admin.ccache (minted fresh by
+# ipa-kubernetes-ca.yml before this chain runs) via env: KRB5CCNAME.
 
 - name: "Ipa-ca-profile | check if cert profile exists: {{ ipa_ca_profile_id }}"
   ansible.builtin.command: "ipa certprofile-show {{ ipa_ca_profile_id }}"
@@ -20,6 +24,8 @@
   failed_when: ipa_ca_profile_show.rc not in [0, 2]
   changed_when: false
   become: true
+  environment:
+    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
 - name: "Ipa-ca-profile | create profile: {{ ipa_ca_profile_id }}"
   when: ipa_ca_profile_show.rc == 2
@@ -30,6 +36,8 @@
       ansible.builtin.command: "ipa certprofile-show --out {{ ipa_ca_profile_file }} caIPAserviceCert"
       no_log: "{{ secure_logs }}"
       changed_when: true
+      environment:
+        KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
 
     - name: "Ipa-ca-profile | customise the profile: {{ ipa_ca_profile_id }}"
       ansible.builtin.lineinfile:
@@ -53,3 +61,5 @@
         --desc "{{ ipa_ca_profile_desc }}" --store TRUE
       no_log: "{{ secure_logs }}"
       changed_when: true
+      environment:
+        KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
