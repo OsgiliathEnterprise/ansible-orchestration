@@ -110,7 +110,16 @@
             updateStrategy:
               type: RollingUpdate
               rollingUpdate:
-                maxUnavailable: "{{ calico_recovery_max_unavailable }}"
+                # IntOrString validation: the API accepts a bare number only as a JSON
+                # integer — a quoted "1" is rejected with 422 ("a valid percent string
+                # must be a numeric string followed by an ending '%'", hit by the
+                # parallels-sequential scenario) — while percentages must stay strings.
+                # Coerce digit-only values to int (native-Jinja preserves the type);
+                # pass anything else (e.g. "100%") through for API-side validation.
+                maxUnavailable: >-
+                  {{ calico_recovery_max_unavailable | trim | int
+                     if (calico_recovery_max_unavailable | trim | string) is match('^[0-9]+$')
+                     else calico_recovery_max_unavailable | trim }}
       become: true
 
   rescue:
