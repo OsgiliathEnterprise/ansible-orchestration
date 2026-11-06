@@ -87,10 +87,21 @@
     - name: Calico-ca-recovery | record recovery phase reached for the failure report
       ansible.builtin.set_fact:
         # If the gate above times out this fact is never set and the rescue report names the
-        # gate phase; if the patch/rollout below times out it names the rollout phase.
+        # gate phase; once set, the failure came from the trigger patch or the decoupled
+        # pod-readiness poll phases (calico_recovery_rollout_retries x ..._delay each).
         calico_recovery_phase: rollout
 
     - name: Calico-ca-recovery | patch calico-node template annotation to trigger rolling restart
+      # wait is deliberately false: the tigera operator reconciles the DaemonSet back to its
+      # own updateStrategy defaults (measured: maxUnavailable 100%/maxSurge 0 patched by us,
+      # live value reverted to maxUnavailable 1/maxSurge 0 shortly after). When a replacement
+      # pod then wedges (BIRD never starts, kubelet StartError backoff, stale CA re-materialised
+      # at pod-creation), the DaemonSet controller cannot progress past the reverted
+      # maxUnavailable and no liveness probe restarts the container: an in-task wait only burns
+      # the budget and fails. The rollout wait is decoupled into the two poll phases below; the
+      # escalation between them deletes stuck pods, and deleted pods are recreated immediately
+      # by the DaemonSet controller on a path that is NOT gated by updateStrategy - so recovery
+      # no longer depends on winning the race with the operator.
       kubernetes.core.k8s:
         api_version: apps/v1
         kind: DaemonSet
@@ -99,8 +110,7 @@
         kubeconfig: "{{ kube_config_path }}"
         context: kubernetes-admin@kubernetes
         state: present
-        wait: true
-        wait_timeout: "{{ kubernetes_rollout_wait_timeout }}"
+        wait: false
         resource_definition:
           spec:
             template:
@@ -121,6 +131,117 @@
                      if (calico_recovery_max_unavailable | trim | string) is match('^[0-9]+$')
                      else calico_recovery_max_unavailable | trim }}
       become: true
+
+    - name: Calico-ca-recovery | set expected calico-node pod count (one per cluster node)
+      ansible.builtin.set_fact:
+        calico_expected_pods: >-
+          {{ (groups[kube_masters_group] | default([]) | count)
+             + (groups[kube_nodes_group] | default([]) | count) }}
+
+    # Poll phases share this readiness expression: every scheduled, non-terminating calico-node
+    # pod must carry the Ready=True condition (string per the K8s API) and their count must
+    # match the cluster node count. Terminating pods (deletionTimestamp set, lingering while
+    # kubelet tears them down) are excluded so they cannot pin the poll to "not Ready".
+    - name: Calico-ca-recovery | wait for calico-node pods to become Ready (phase 1)
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        label_selectors:
+          - "k8s-app=calico-node"
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_rollout_pods
+      retries: "{{ calico_recovery_rollout_retries }}"
+      delay: "{{ calico_recovery_rollout_delay }}"
+      until: >-
+        ((calico_rollout_pods.resources | default([])
+            | rejectattr('metadata.deletionTimestamp', 'defined') | list | length)
+            == (calico_expected_pods | int)) and
+        ((calico_rollout_pods.resources | default([])
+            | rejectattr('metadata.deletionTimestamp', 'defined')
+            | map(attribute='status.conditions', default=[])
+            | map('selectattr', 'type', 'equalto', 'Ready')
+            | map('selectattr', 'status', 'equalto', 'True')
+            | map('list') | map('length') | select('gt', 0) | list | length)
+            == (calico_expected_pods | int))
+      # Read-only poll: exhausting the budget must not abort the play here - the escalation
+      # below acts on the outcome and phase 2 is the point of no return (its failure routes
+      # into the rescue evidence report).
+      ignore_errors: true
+
+    - name: Calico-ca-recovery | name Ready calico-node pods
+      # Loop-based accumulation (same pattern as the rescue evidence below): 'selectattr' is a
+      # filter, not a test, so a nested selectattr(...) inside a selectattr() test argument
+      # would raise. Terminating pods (deletionTimestamp set) never count as Ready.
+      ansible.builtin.set_fact:
+        calico_ready_pod_names: >-
+          {{ calico_ready_pod_names | default([])
+             + ([item.metadata.name]
+                if item.metadata.deletionTimestamp is not defined
+                   and (item.status.conditions | default([])
+                        | selectattr('type', 'equalto', 'Ready')
+                        | selectattr('status', 'equalto', 'True') | list | length) > 0
+                else []) }}
+      loop: "{{ calico_rollout_pods.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name | default('<unnamed>') }}"
+
+    - name: Calico-ca-recovery | name calico-node pods stuck not-Ready after phase 1
+      ansible.builtin.set_fact:
+        calico_stuck_pods: >-
+          {{ (calico_rollout_pods.resources | default([])
+                | rejectattr('metadata.deletionTimestamp', 'defined') | list)
+              | rejectattr('metadata.name', 'in', calico_ready_pod_names | default([]))
+              | map(attribute='metadata.name') | list }}
+
+    - name: Calico-ca-recovery | escalate by deleting calico-node pods stuck not-Ready
+      # Deleting a pod releases the DaemonSet controller to recreate it immediately on the
+      # current template - that recreation path is not gated by updateStrategy (unlike a
+      # rollout), so the operator's reverted maxUnavailable cannot stall it - and a fresh pod
+      # object resets kubelet's StartError back-off and re-materialises the post-swap CA.
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        name: "{{ item }}"
+        state: absent
+        wait: false
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      loop: "{{ calico_stuck_pods | default([]) }}"
+      when: calico_stuck_pods | default([]) | length > 0
+
+    - name: Calico-ca-recovery | wait for calico-node pods to become Ready after escalation (phase 2)
+      # Runs whenever phase 1 exhausted its budget (stuck pods were deleted above, or pods are
+      # simply missing and the controller needs more time to create them). Its budget failure is
+      # a real failure: it routes into the rescue evidence collection and the final fail report.
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        label_selectors:
+          - "k8s-app=calico-node"
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_final_pods
+      retries: "{{ calico_recovery_rollout_retries }}"
+      delay: "{{ calico_recovery_rollout_delay }}"
+      until: >-
+        ((calico_final_pods.resources | default([])
+            | rejectattr('metadata.deletionTimestamp', 'defined') | list | length)
+            == (calico_expected_pods | int)) and
+        ((calico_final_pods.resources | default([])
+            | rejectattr('metadata.deletionTimestamp', 'defined')
+            | map(attribute='status.conditions', default=[])
+            | map('selectattr', 'type', 'equalto', 'Ready')
+            | map('selectattr', 'status', 'equalto', 'True')
+            | map('list') | map('length') | select('gt', 0) | list | length)
+            == (calico_expected_pods | int))
+      when: calico_rollout_pods.failed | default(false)
 
   rescue:
     # Report-only evidence collection: nothing in this block may fail the play. A crashed
@@ -274,7 +395,8 @@
         # a Ready pod in cluster order (the difference filter is set-based and reorders).
         # Empty result -> fallback hint. The phase names the budget that was exhausted: the
         # all-nodes Ready gate (calico_recovery_nodes_ready_retries x ..._delay) when the fact
-        # was never set, the rollout wait (kubernetes_rollout_wait_timeout) once set.
+        # was never set, the decoupled pod-readiness phases (calico_recovery_rollout_retries x
+        # ..._delay, plus the deletion escalation between them) once set.
         msg: >-
           calico-node CA recovery did not complete (phase:
           {{ calico_recovery_phase | default('all-nodes Ready gate') }});

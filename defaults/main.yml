@@ -52,6 +52,13 @@ calico_recovery_max_unavailable: "100%"
 # case; the kvm scenario raises the retries to match its 600s rollout budget.
 calico_recovery_nodes_ready_retries: 30
 calico_recovery_nodes_ready_delay: 10
+# Per-phase budget for the decoupled calico-node rollout wait (tasks/calico-ca-recovery.yml):
+# phase 1 polls pod readiness after the trigger patch; on timeout it escalates by deleting the
+# stuck pods (recreation is not gated by updateStrategy, so the tigera operator's revert of our
+# maxUnavailable cannot stall it) and phase 2 re-polls with the same budget. 18 x 10s covers the
+# measured ~45-90s parallel/serial restart plus one kubelet StartError back-off cycle.
+calico_recovery_rollout_retries: 18
+calico_recovery_rollout_delay: 10
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
 vault_kube_admin_password: "KubeClusterAdm2026"
 orchestration_kube_port: 6443
