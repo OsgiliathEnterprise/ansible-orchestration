@@ -9,7 +9,7 @@ Define how the `kubeclusteradm` IPA service account is provisioned so that it is
 ### Requirement: kubeclusteradm is Kerberos-authenticable immediately after provisioning
 The role SHALL ensure the `kubeclusteradm` IPA user can obtain a Kerberos ticket via non-interactive `kinit`, both when the account is freshly created and on re-converge. Because FreeIPA stores API-set passwords with an immediate expiration (`krbPasswordExpiration` = set time) and the KDC rejects changepw within the min-password-age window after creation ("Too soon"), the role SHALL create the user without a password and set its Kerberos key with `kadmin.local cpw` on the IPA server, which bypasses the KDC changepw policy and stores no `krbPasswordExpiration` attribute (the KDC computes the expiration as last-change + maxpwage).
 
-The steady-state credential SHALL be the keytab, not the password: `ipa-cert-renewal.yml` exports the renewal keytab with `ipa-getkeytab`, which rotates the principal key as a documented side effect — from the first converge onward the managed password is dead by design. No non-rotating keytab export exists (`kadmin.local ktadd` also bumps the key VNO), so the password cannot be kept alive across keytab regeneration.
+The steady-state credential SHALL be the keytab, not the password: `ipa-cert-renewal.yml` exports the renewal keytab with a **non-rotating** keytab export (`community.general.ipa_getkeytab` on the IPA server — the native-module export, replacing the earlier `kadmin.local ktadd -norandkey` shell plan; see design D3 amendment). The export writes the current KDB key without rotating it: the principal key is unchanged by re-export (kvno stable), the managed password is not invalidated by keytab regeneration, and the keytab tracks the KDB — if the KDB key changes externally, the next regeneration writes the current key. The `cpw` task's `Too soon to change password` exposure therefore no longer arises from keytab export; the `cpw` gate (both credentials unusable) and the fresh-install password fallback are unchanged.
 
 The probe and verification tasks SHALL run delegated to the IPA server (`become`, where `/tmp/kubeclusteradm.keytab` lives), try the keytab first, and fall back to the managed password only on the fresh-install path (no keytab yet, before `ipa-cert-renewal.yml` runs).
 
@@ -18,8 +18,12 @@ The probe and verification tasks SHALL run delegated to the IPA server (`become`
 - **THEN** the probe reports the credential missing, the role runs `kadmin.local cpw` on the IPA server, and verification succeeds via the password branch (the keytab does not exist yet — it is generated later by `ipa-cert-renewal.yml`)
 
 #### Scenario: Re-converge on an already-usable credential
-- **WHEN** the keytab is usable (a `kinit -kt` on the IPA server succeeds)
+- **WHEN** the keytab is usable (a native keytab probe — `krb_ticket` with `keytab: true` — succeeds on the IPA server)
 - **THEN** the probe reports the keytab usable, the `cpw` task is skipped (no min-age-window exposure), verification succeeds via the keytab, and no account state is changed
+
+#### Scenario: Managed password survives keytab export
+- **WHEN** the role exports (or re-exports) the keytab during the renewal flow
+- **THEN** the export fetches the current KDB key without rotating it, the managed password remains usable, and both credential paths (keytab and password) stay available — the password fallback is a live recovery path, not a dead letter
 
 #### Scenario: Credential rotated or changed after provisioning
 - **WHEN** the keytab is stale (the KDB key rotated out from under it) or the password was changed or expired by an owner

@@ -19,12 +19,33 @@
 - name: Kube-install-join | join node (skip if already joined)
   when: not kube_node_joined.stat.exists
   block:
+    # Scratch admin ticket for the two idm-delegated `ipa` consumers below
+    # (profile gate + CA fetch): they get the cache via env: KRB5CCNAME
+    # instead of an in-shell `kinit admin` into the shared ambient cache.
+    # Pre-cleared so a stale/expired ticket is never reused; changed_when:
+    # false — the scratch cache is ephemeral state.
+    - name: Kube-install-join | pre-clear admin ticket scratch cache
+      ansible.builtin.file:
+        path: /tmp/.join_node_admin.ccache
+        state: absent
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+
+    - name: Kube-install-join | acquire admin ticket into scratch cache
+      community.general.krb_ticket:
+        principal: admin
+        password: "{{ company_realm_password }}"
+        cache_name: /tmp/.join_node_admin.ccache
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      no_log: "{{ secure_logs }}"
+      changed_when: false
+
     # --- Gate: the CA + per-node profile must exist in FreeIPA before the CA fetch (design D1) ---
     # The CA is created before the profile, so passing this gate guarantees the fetch succeeds.
     - name: Kube-install-join | wait for kubernetesNodes profile to exist in FreeIPA
       ansible.builtin.shell: |
-        set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-        ipa certprofile-find | grep -c ': kubernetesNodes'
+        set -o pipefail && ipa certprofile-find | grep -c ': kubernetesNodes'
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
@@ -33,17 +54,20 @@
       delay: "{{ orchestration_readiness_delay }}"
       register: node_profile_check
       until: node_profile_check.stdout == '1'
+      environment:
+        KRB5CCNAME: /tmp/.join_node_admin.ccache
 
 
     # --- Trust anchor from FreeIPA (task 3.1): fetch CA from the IDM host, not master ---
     - name: Kube-install-join | fetch CA cert from FreeIPA (delegated to idm)
       ansible.builtin.shell: |
-        set -o pipefail && echo '{{ company_realm_password }}' | kinit admin > /dev/null
-        ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt
+        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
       no_log: "{{ secure_logs }}"
+      environment:
+        KRB5CCNAME: /tmp/.join_node_admin.ccache
 
     - name: Kube-install-join | slurp CA cert from idm
       ansible.builtin.slurp:

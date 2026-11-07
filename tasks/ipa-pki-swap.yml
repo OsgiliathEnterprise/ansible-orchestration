@@ -41,7 +41,7 @@
 # by the functional gates below (KCM lease freshness, scheduler Ready).
 - name: Ipa-pki-swap | wait for API server to be healthy with post-swap certificate (validated)
   ansible.builtin.uri:
-    url: "https://{{ orchestration_master_ip }}:{{ kubernetes_api_port }}/healthz"
+    url: "https://{{ orchestration_master_ip }}:{{ orchestration_kube_port }}/healthz"
     ca_path: "{{ kubernetes_certificates_path }}ca.crt"
     status_code: 200
   become: true

@@ -1,0 +1,34 @@
+---
+# Ensure a host is a member of a CA ACL, idempotently (check-then-add).
+#
+# `ipa caacl-add-host` is NOT idempotent (rc=1 "This entry is already a member"),
+# so membership is checked read-only first (`caacl-show --all` lists the granted
+# hosts on the `Hosts:` line; `user category: all` covers users only, so host
+# grants must be explicit) and the add runs only when the host is missing.
+#
+# Include with vars:
+#   ipa_ca_acl_name:  CA ACL name (e.g. `kubernetes-ca-acl` or `{{ ca_name }}-acl`).
+#   ipa_ca_acl_host:  host to grant (exact inventory host name).
+#
+# Authentication: the delegated idm session consumes the scratch admin ticket
+# at /tmp/.renewal_admin.ccache via environment: KRB5CCNAME — the sole caller,
+# ipa-cert-renewal.yml, mints it fresh (pre-cleared, from
+# company_realm_password) before the loops that include this file. The include
+# therefore must not be called without that ticket in place.
+
+- name: "Ipa-ca-acl-host | ensure host membership in acl {{ ipa_ca_acl_name }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ipa caacl-show {{ ipa_ca_acl_name }} --all | grep -q "^ *Hosts:.*{{ ipa_ca_acl_host }}"; then
+      echo "ACL-GRANT-PRESENT"
+    else
+      ipa caacl-add-host {{ ipa_ca_acl_name }} --hosts={{ ipa_ca_acl_host }}
+      echo "ACL-GRANT-ADDED"
+    fi
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  register: ipa_ca_acl_host_result
+  changed_when: "'ACL-GRANT-ADDED' in ipa_ca_acl_host_result.stdout"
+  environment:
+    KRB5CCNAME: /tmp/.renewal_admin.ccache

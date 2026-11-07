@@ -20,68 +20,130 @@
   no_log: "{{ secure_logs }}"
   when: kube_masters_group in group_names
 
-- name: Ipa-cert-renewal | Grant kubernetes-ca access to all kube hosts (host-principal renewal)
-  ansible.builtin.shell: |
-    set -o pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    if ipa caacl-show kubernetes-ca-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
-      echo "ACL-GRANT-PRESENT"
-    else
-      ipa caacl-add-host kubernetes-ca-acl --hosts={{ item }}
-      echo "ACL-GRANT-ADDED"
-    fi
-  loop: "{{ groups[kube_masters_group] + groups[kube_nodes_group] }}"
+# Host grants run before the renewal script is deployed (below): the script
+# authenticates as the host principal and the kubeclusteradm user, so their
+# ACL membership must exist before the first unattended tick. The
+# check-then-add pattern lives in the shared include (single source of
+# truth; see tasks/ipa-ca-acl-host.yml).
+
+# Scratch admin ticket for this file's idm-delegated `ipa` consumers: the
+# looped CA-ACL grants (ipa-ca-acl-host.yml) authenticate with this cache via
+# environment: KRB5CCNAME. Runs unconditionally before the loops. Pre-cleared
+# so a stale/expired ticket is never reused; changed_when: false — the scratch
+# cache is ephemeral state. (The keytab export below does NOT need it:
+# kadmin.local binds to the local KDB.)
+- name: Ipa-cert-renewal | pre-clear admin ticket scratch cache
+  ansible.builtin.file:
+    path: /tmp/.renewal_admin.ccache
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
+- name: Ipa-cert-renewal | acquire admin ticket into scratch cache
+  community.general.krb_ticket:
+    principal: admin
+    password: "{{ company_realm_password }}"
+    cache_name: /tmp/.renewal_admin.ccache
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
-  register: caacl_grant_result
-  changed_when: "'ACL-GRANT-ADDED' in caacl_grant_result.stdout"
+  changed_when: false
+
+- name: Ipa-cert-renewal | Grant kubernetes-ca access to all kube hosts (host-principal renewal)
+  ansible.builtin.include_tasks: ipa-ca-acl-host.yml
+  loop: "{{ groups[kube_masters_group] + groups[kube_nodes_group] }}"
+  vars:
+    ipa_ca_acl_name: "kubernetes-ca-acl"
+    ipa_ca_acl_host: "{{ item }}"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Grant kubeclusteradm CA access to all hosts (host-principal renewal)
-  ansible.builtin.shell: |
-    set -o pipefail
-    echo '{{ company_realm_password }}' | kinit admin > /dev/null
-    if ipa caacl-show {{ ipa_kubeclusteradm_ca_name }}-acl --all | grep -q "^ *Hosts:.*{{ item }}"; then
-      echo "ACL-GRANT-PRESENT"
-    else
-      ipa caacl-add-host {{ ipa_kubeclusteradm_ca_name }}-acl --hosts={{ item }}
-      echo "ACL-GRANT-ADDED"
-    fi
+  ansible.builtin.include_tasks: ipa-ca-acl-host.yml
   loop: "{{ groups[idm_group] + groups[kube_masters_group] + groups[kube_nodes_group] }}"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-  register: caacl_kubeclusteradm_grant_result
-  changed_when: "'ACL-GRANT-ADDED' in caacl_kubeclusteradm_grant_result.stdout"
+  vars:
+    ipa_ca_acl_name: "{{ ipa_kubeclusteradm_ca_name }}-acl"
+    ipa_ca_acl_host: "{{ item }}"
   when: kube_masters_group in group_names
 
-- name: Ipa-cert-renewal | Generate kubeclusteradm keytab on idm
-  # Gate on usability (kinit), not file presence: a stale keytab (the KDB key
-  # rotated out from under it) must trigger a regeneration, which a mere file
-  # check would not. `ipa-getkeytab` rotates the principal key as a documented
-  # side effect — so after generation the managed password is dead by design
-  # and the keytab itself is the steady-state credential (see
-  # ipa-kube-admin-credential.yml).
-  ansible.builtin.shell: |
-    set -o pipefail
-    if kinit -kt /tmp/kubeclusteradm.keytab 2>/dev/null; then
-      echo "KEYTAB-USABLE"
-    else
-      echo '{{ company_realm_password }}' | kinit admin > /dev/null
-      # rm first: ipa-getkeytab (ktadd) APPENDS entries, so a stale entry left
-      # at the top of the file would shadow the fresh one (kinit uses the first
-      # matching entry) — the file must hold exactly the current key.
-      rm -f /tmp/kubeclusteradm.keytab
-      ipa-getkeytab -p kubeclusteradm@{{ company_domain | upper }} -k /tmp/kubeclusteradm.keytab
-      echo "KEYTAB-GENERATED"
-    fi
+- name: Ipa-cert-renewal | probe kubeclusteradm keytab usability
+  # Gate regeneration on usability, not file presence: a stale keytab (the KDB
+  # key rotated out from under it) must trigger a regeneration, which a mere
+  # file check would not. The probe mints a fresh ticket from the keytab into
+  # a scratch cache (pre-cleared) — no ambient cache read or write, and no
+  # change reported (the cache is ephemeral state). `principal` is required:
+  # keytab-only kinit requests the machine's default (host) principal, which
+  # is never present in this user keytab.
+  when: kube_masters_group in group_names
+  block:
+    - name: Ipa-cert-renewal | pre-clear rotation probe scratch cache
+      ansible.builtin.file:
+        path: /tmp/.kca_rotation_probe.ccache
+        state: absent
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+
+    - name: Ipa-cert-renewal | mint keytab ticket into scratch cache
+      community.general.krb_ticket:
+        keytab: true
+        keytab_path: /tmp/kubeclusteradm.keytab
+        principal: "{{ ipa_kube_admin_principal }}"
+        cache_name: /tmp/.kca_rotation_probe.ccache
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      changed_when: false
+  rescue:
+    - name: Ipa-cert-renewal | mark keytab unusable (triggers the re-export below)
+      ansible.builtin.set_fact:
+        kca_rotation_keytab_usable: false
+
+# Regeneration is a two-step pair, both gated on the usability probe above:
+# delete, then export the CURRENT key. Steady state: the probe passes and
+# both tasks are skipped — no keytab churn, and the one time they do run they
+# genuinely regenerate, so no blanket changed_when is needed.
+- name: Ipa-cert-renewal | remove unusable keytab before re-export
+  # ktadd APPENDS entries, so a stale entry left at the top of the file would
+  # shadow the fresh key (kinit uses the first matching entry) — the file must
+  # hold exactly the current key. Deletion is declarative here, not an inline
+  # `rm -f` inside the export command.
+  ansible.builtin.file:
+    path: /tmp/kubeclusteradm.keytab
+    state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
-  no_log: "{{ secure_logs }}"
-  register: kubeclusteradm_keytab_result
-  changed_when: "'KEYTAB-GENERATED' in kubeclusteradm_keytab_result.stdout"
-  when: kube_masters_group in group_names
+  when:
+    - kube_masters_group in group_names
+    - not (kca_rotation_keytab_usable | default(true))
+
+- name: Ipa-cert-renewal | export kubeclusteradm keytab on idm (kadmin.local ktadd -norandkey, non-rotating)
+  # SHELL EXCEPTION (no native equivalent, verified 2026-11-01 on
+  # freeipa-server-4.13.4): community.general.ipa_getkeytab cannot perform a
+  # non-rotating export here. Its only non-rotating mode is retrieve_mode
+  # (--retrieve), but FreeIPA protects krbPrincipalKey behind a search-only
+  # ACI, so the server rejects --retrieve with "Insufficient access rights"
+  # for every requester — admin included (VM-reproduced for user, host and
+  # service principals). The module's default mode GENERATES a new key
+  # (rotates), which the credential contract forbids (design D8: the managed
+  # password must survive re-export; the keytab must track the KDB).
+  # `kadmin.local ktadd -norandkey` (MIT kadmin, on the IPA master) writes
+  # the stored key verbatim — no rotation, kvno unchanged, managed password
+  # still mints a ticket after export (VM-verified). kadmin.local binds to
+  # the local KDB: no ticket, no keytab, no password in parameters, and the
+  # -norandkey export only works on the master — which is exactly where this
+  # task is delegated.
+  # changed_when gated on ktadd's own "added to keytab" receipt (not a
+  # blanket suppression): success without writing entries would report
+  # no-change instead of hiding a silent no-op.
+  ansible.builtin.command:
+    cmd: >-
+      kadmin.local -q
+      "ktadd -norandkey -k /tmp/kubeclusteradm.keytab {{ ipa_kube_admin_principal }}@{{ company_domain | upper }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  register: kca_keytab_export
+  changed_when: "'added to keytab' in kca_keytab_export.stdout"
+  when:
+    - kube_masters_group in group_names
+    - not (kca_rotation_keytab_usable | default(true))
 
 - name: Ipa-cert-renewal | Fetch keytab as base64
   ansible.builtin.command: base64 -w0 /tmp/kubeclusteradm.keytab
