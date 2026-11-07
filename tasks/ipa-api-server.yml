@@ -20,7 +20,13 @@
   failed_when: false
 
 # ipacert also requires an existing service principal for every DNS SAN
-# ("The service principal for subject alt name X ... does not exist").
+# ("The service principal for subject alt name X ... does not exist"), and —
+# since self-enrollment authenticates with the master's *host* ticket — the
+# certificate's DNS SANs are privilege-checked against service ownership:
+# every HTTP/<san> must be managed by a host the authenticated principal
+# controls (otherwise: "Insufficient privilege to create a certificate with
+# subject alt name ..."). So the alias services are created managed-by the
+# master host, exactly like HTTP/<master> above.
 #
 # skip_host_check: True — the alias names are DNS names, not IPA host entries, so the
 # host_show lookup is skipped.
@@ -33,10 +39,11 @@
 # ("hostname has an A record in the zone") is enforced earlier by ipa-kubernetes-ca.yml
 # (A+PTR records for kubernetes-svc / kubernetes-master); force skips only the
 # resolvability check (matches the HTTP/<master> task above, which already uses force).
-- name: Ipa-api-server | configure http services for SAN alias names (satisfies ipacert service principal check)
+- name: Ipa-api-server | configure http services for SAN alias names (satisfies ipacert service principal and SAN-ownership checks)
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
     name: "{{ item }}"
+    host: "{{ orchestration_host_hostname }}"
     skip_host_check: True
     force: True
   delegate_to: "{{ groups[idm_group] | first }}"
@@ -69,9 +76,30 @@
    - not orchestration_apiservercert.stat.exists
   become: true
 
+# The master owns this certificate's identity, so it authenticates the request
+# with its own host ticket (C3): minted from the master's /etc/krb5.keytab into
+# a pre-cleared scratch cache, consumed via KRB5CCNAME — no ipaadmin_password
+# on the wire. The CA #1 ACL (kubernetes-ca-acl, usercat=all, created in
+# ipa-ca-ensure.yml) authorizes the authenticated host principal to request the
+# HTTP/<master> certificate; verified by spike before this conversion.
+- name: Ipa-api-server | pre-clear master host ticket scratch cache
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}/host_master.apiserver.ccache"
+    state: absent
+  become: true
+  changed_when: false
+
+- name: Ipa-api-server | acquire master host ticket from the host keytab
+  community.general.krb_ticket:
+    keytab: true
+    keytab_path: /etc/krb5.keytab
+    principal: "host/{{ orchestration_host_hostname }}"
+    cache_name: "{{ kube_scratch_cache_dir }}/host_master.apiserver.ccache"
+  become: true
+  changed_when: false
+
 - name: Ipa-api-server | request apiserver certificate from IPA
   freeipa.ansible_freeipa.ipacert:
-    ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
     principal: "HTTP/{{ orchestration_host_hostname }}"
     csr_file: "{{ kubernetes_certificates_path }}apiserver.csr"
@@ -80,3 +108,5 @@
     state: requested
   no_log: "{{ secure_logs }}"
   become: true
+  environment:
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/host_master.apiserver.ccache"

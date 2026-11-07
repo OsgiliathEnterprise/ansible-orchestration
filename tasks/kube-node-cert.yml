@@ -1,21 +1,21 @@
 ---
-# Request this worker node's own client certificate from the kubeclusteradm CA (CA #2).
-# The CSR carries CN=<hostname> (matching the host principal so IPA's host-principal
-# hostname check passes); the kubernetesNodes profile template adds the system:node:
-# prefix, so the ISSUED cert is O=system:nodes, CN=system:node:<hostname> and the
-# kubelet registers with node-scoped RBAC instead of a shared admin identity (D1/D5).
-# Key/CSR are generated on the control plane (which has community.crypto) and the
-# CSR is shuttled to idm, where the cert is enrolled against the local IPA API;
-# the ISSUED cert and the key are then copied back to the node.
+# Request this worker node's own client certificate from the kubeclusteradm CA (CA #2),
+# entirely on the node (principals-in-place D2): the private key, the CSR, the Kerberos
+# ticket and the enrollment all stay on the node — the master never mints the node's
+# key and no admin identity ever holds the node's private key. The node authenticates
+# to the IPA API with its own host keytab (/etc/krb5.keytab), the same identity
+# kube-cert-renew.sh.j2 uses to renew this certificate at runtime.
 #
-# Authentication: no ipaadmin_password is passed to any module. The ipacert
-# enrollment (delegated to idm) authenticates with a scratch admin ticket minted
-# by community.general.krb_ticket (pre-cleared first, so a stale ticket is never
-# reused) via environment: KRB5CCNAME — the same convention as
-# ipa-cert-renewal.yml and kube-install-join-node.yml. The admin identity (not
-# kubeclusteradm) is deliberate: this file runs before
-# ipa-kube-admin-credential.yml, so at enrollment time the kubeclusteradm user
-# and its keytab do not exist yet.
+# The CSR carries CN=<hostname> (matching host/<hostname> so IPA's host-principal
+# hostname check passes) and O=system:nodes; the kubernetesNodes profile template adds
+# the system:node: prefix, so the ISSUED cert is O=system:nodes,
+# CN=system:node:<hostname> and the kubelet registers with node-scoped RBAC instead of
+# a shared admin identity.
+#
+# Prerequisites are already in place when this runs: main.yml includes the master's
+# ipa-certs.yml (which provisions CA #2, the kubernetesNodes profile and the
+# ipa-ca-acl-prejoin.yml host grants) before kube-install-join-node.yml, and the node
+# is an enrolled IPA client from prepare.yml, so /etc/krb5.keytab exists pre-join.
 
 - name: Kube-node-cert | check if node client cert exists locally
   ansible.builtin.stat:
@@ -23,18 +23,47 @@
   register: node_client_cert_result
   become: true
 
-- name: Kube-node-cert | create node client private key (on control plane)
+# openssl_privatekey/openssl_csr write into this directory but do not create it;
+# the old shuttle flow relied on `copy` parent creation, the node-local flow needs
+# it to exist before the key task.
+- name: Kube-node-cert | ensure certificate directory exists
+  ansible.builtin.file:
+    path: "{{ kubernetes_certificates_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Kube-node-cert | pre-clear node host ticket scratch cache
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}/{{ orchestration_host_hostname }}.node_cert.ccache"
+    state: absent
+  become: true
+  changed_when: false
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | acquire ticket from the node's own host keytab
+  community.general.krb_ticket:
+    keytab: true
+    keytab_path: /etc/krb5.keytab
+    principal: "host/{{ orchestration_host_hostname }}"
+    cache_name: "{{ kube_scratch_cache_dir }}/{{ orchestration_host_hostname }}.node_cert.ccache"
+  become: true
+  changed_when: false
+  when: not node_client_cert_result.stat.exists
+
+- name: Kube-node-cert | create node client private key (on the node)
   community.crypto.openssl_privatekey:
-    path: "/tmp/node-{{ orchestration_host_hostname }}.key"
+    path: "{{ kubernetes_certificates_path }}node-client.key"
     mode: '0600'
-  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   when: not node_client_cert_result.stat.exists
 
-- name: Kube-node-cert | create node client csr (on control plane)
+- name: Kube-node-cert | create node client csr (on the node)
   community.crypto.openssl_csr:
-    path: "/tmp/node-{{ orchestration_host_hostname }}.csr"
-    privatekey_path: "/tmp/node-{{ orchestration_host_hostname }}.key"
+    path: "{{ kubernetes_certificates_path }}node-client.csr"
+    privatekey_path: "{{ kubernetes_certificates_path }}node-client.key"
     country_name: "{{ kube_credential_country_name }}"
     organization_name: "system:nodes"
     email_address: "{{ kube_credential_email_address }}"
@@ -43,117 +72,24 @@
     common_name: "{{ orchestration_host_hostname }}"
     key_usage: [digitalSignature, keyEncipherment]
     extended_key_usage: [clientAuth]
-  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   when: not node_client_cert_result.stat.exists
 
-- name: Kube-node-cert | pre-clear node-cert admin ticket scratch cache (on idm)
-  ansible.builtin.file:
-    path: /tmp/.node_cert_admin.ccache
-    state: absent
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  changed_when: false
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | acquire admin ticket for cert enrollment (on idm)
-  community.general.krb_ticket:
-    principal: admin
-    password: "{{ company_realm_password }}"
-    cache_name: /tmp/.node_cert_admin.ccache
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-  changed_when: false
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | slurp node client csr from control plane
-  ansible.builtin.slurp:
-    src: "/tmp/node-{{ orchestration_host_hostname }}.csr"
-  delegate_to: "{{ groups[kube_masters_group] | first }}"
-  become: true
-  register: node_client_csr
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | stage node client csr on idm for enrollment
-  ansible.builtin.copy:
-    content: "{{ node_client_csr.content | b64decode }}"
-    dest: "/tmp/node-{{ orchestration_host_hostname }}.csr"
-    mode: '0600'
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  when: not node_client_cert_result.stat.exists
-
-- name: "Kube-node-cert | request node client certificate from the kubeclusteradm CA (CA #2, on idm)"
-  # Delegated to idm (the IPA master) so the module talks to the local IPA API
-  # and consumes the scratch admin ticket via KRB5CCNAME — no ipaadmin_password
-  # on the wire. The CSR was staged to idm by the task above; the CA ACL
-  # (kubeclusteradm-acl: user category all + explicit host grants) and profile
-  # linkage cover the request for principal host/<hostname>.
+- name: "Kube-node-cert | self-enroll node client certificate from the kubeclusteradm CA (CA #2)"
+  # Node-local enrollment against the remote IPA API: the module authenticates with
+  # the node's own host ticket via KRB5CCNAME — no ipaadmin_password on the wire, and
+  # neither the master nor idm ever holds the private key. The CA ACL
+  # (kubeclusteradm-acl: user category all + explicit host grants from
+  # ipa-ca-acl-prejoin.yml) and profile linkage cover the request for
+  # principal host/<hostname>.
   freeipa.ansible_freeipa.ipacert:
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "host/{{ orchestration_host_hostname }}"
-    csr_file: "/tmp/node-{{ orchestration_host_hostname }}.csr"
-    certificate_out: "/tmp/node-{{ orchestration_host_hostname }}.crt"
+    csr_file: "{{ kubernetes_certificates_path }}node-client.csr"
+    certificate_out: "{{ kubernetes_certificates_path }}node-client.crt"
     profile_id: kubernetesNodes
     state: requested
-  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
-  no_log: "{{ secure_logs }}"
   environment:
-    KRB5CCNAME: /tmp/.node_cert_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/{{ orchestration_host_hostname }}.node_cert.ccache"
   when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | slurp node client cert from idm
-  ansible.builtin.slurp:
-    src: "/tmp/node-{{ orchestration_host_hostname }}.crt"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  register: node_client_crt
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | slurp node client key from control plane
-  ansible.builtin.slurp:
-    src: "/tmp/node-{{ orchestration_host_hostname }}.key"
-  delegate_to: "{{ groups[kube_masters_group] | first }}"
-  become: true
-  register: node_client_key
-  no_log: "{{ secure_logs }}"
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | install node client cert on node
-  ansible.builtin.copy:
-    content: "{{ node_client_crt.content | b64decode }}"
-    dest: "{{ kubernetes_certificates_path }}node-client.crt"
-    mode: '0644'
-  become: true
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | install node client key on node
-  ansible.builtin.copy:
-    content: "{{ node_client_key.content | b64decode }}"
-    dest: "{{ kubernetes_certificates_path }}node-client.key"
-    mode: '0600'
-  no_log: "{{ secure_logs }}"
-  become: true
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | clean up temp files on control plane
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  delegate_to: "{{ groups[kube_masters_group] | first }}"
-  become: true
-  loop:
-    - "/tmp/node-{{ orchestration_host_hostname }}.key"
-    - "/tmp/node-{{ orchestration_host_hostname }}.csr"
-
-- name: Kube-node-cert | clean up staged temp files on idm
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  loop:
-    - "/tmp/node-{{ orchestration_host_hostname }}.csr"
-    - "/tmp/node-{{ orchestration_host_hostname }}.crt"

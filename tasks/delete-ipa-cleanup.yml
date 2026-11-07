@@ -4,18 +4,32 @@
 # env: KRB5CCNAME instead of an in-shell `kinit admin` into the shared ambient
 # cache. Pre-cleared so a stale/expired ticket is never reused; changed_when:
 # false — the scratch cache is ephemeral state.
+# krb_ticket shells to `kinit -c`, which cannot create the cache's parent
+# directory, and this file runs before requirements.yml (delete.yml path), so
+# the scratch cache directory is ensured on idm here first.
+- name: Delete-ipa-cleanup | ensure scratch Kerberos credential cache directory on idm
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
 - name: Delete-ipa-cleanup | pre-clear admin ticket scratch cache
   ansible.builtin.file:
-    path: /tmp/.cleanup_admin.ccache
+    path: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  changed_when: false
 
 - name: Delete-ipa-cleanup | acquire admin ticket into scratch cache
   community.general.krb_ticket:
     principal: admin
     password: "{{ company_realm_password }}"
-    cache_name: /tmp/.cleanup_admin.ccache
+    cache_name: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
@@ -37,7 +51,10 @@
 - name: "Delete-ipa-cleanup | Revoke admin certificate from the kubeclusteradm CA (CA #2) using serial number"
   # The cluster-admin client cert is enrolled under CA #2 (kubeclusteradm), so the
   # revocation targets CA #2. `failed_when: false` — the cert may not exist (fresh
-  # destroy) or may already be revoked.
+  # destroy) or may already be revoked. Delegated to idm (principals-in-place 4.2):
+  # revocation is an idm-side admin call — the admin password is never handed to
+  # the IPA API from a kube host; the serial number was extracted on the kube host
+  # above and resolves from the originating host's registered vars.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
@@ -46,6 +63,7 @@
     reason: 4
   failed_when: false
   when: _cleanup_admin_cert_stat.stat.exists and _cleanup_admin_cert_info is defined
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -63,6 +81,8 @@
   become: true
 
 - name: Delete-ipa-cleanup | Revoke apiserver certificate from IPA using serial number
+  # Delegated to idm (principals-in-place 4.2) — idm-side admin call, see the
+  # admin-cert revoke above for the pattern.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: kubernetes-ca
@@ -71,6 +91,7 @@
     reason: 4
   failed_when: false
   when: _cleanup_apiserver_cert_stat.stat.exists and _cleanup_apiserver_cert_info is defined
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -90,6 +111,7 @@
 - name: "Delete-ipa-cleanup | Revoke kubelet client certificate from the kubeclusteradm CA (CA #2) using serial number"
   # The kubelet client cert is re-registered under CA #2 (kubeclusteradm), so the
   # revocation targets CA #2. `failed_when: false` — the cert may not exist.
+  # Delegated to idm (principals-in-place 4.2) — idm-side admin call.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
@@ -98,6 +120,7 @@
     reason: 4
   failed_when: false
   when: _cleanup_kubelet_cert_stat.stat.exists and _cleanup_kubelet_cert_info is defined
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -117,6 +140,7 @@
 - name: "Delete-ipa-cleanup | Revoke front-proxy certificate from the kubeclusteradm CA (CA #2) using serial number"
   # The front-proxy client cert is re-registered under CA #2 (kubeclusteradm), so
   # the revocation targets CA #2. `failed_when: false` — the cert may not exist.
+  # Delegated to idm (principals-in-place 4.2) — idm-side admin call.
   freeipa.ansible_freeipa.ipacert:
     ipaadmin_password: "{{ company_realm_password }}"
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
@@ -125,6 +149,7 @@
     reason: 4
   failed_when: false
   when: _cleanup_frontproxy_cert_stat.stat.exists and _cleanup_frontproxy_cert_info is defined
+  delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
 
@@ -138,7 +163,7 @@
     set -euo pipefail
     ipa ca-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}' || true
   environment:
-    KRB5CCNAME: /tmp/.cleanup_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   register: _cleanup_kubeclusteradm_ca_exists
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
@@ -155,7 +180,7 @@
     set -o pipefail
     ipa caacl-find | grep -c ': {{ ipa_kubeclusteradm_ca_name }}-acl' || true
   environment:
-    KRB5CCNAME: /tmp/.cleanup_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   register: _cleanup_kubeclusteradm_ca_acl_exists
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
@@ -180,7 +205,7 @@
       echo "CA-NOT-LINKED"
     fi
   environment:
-    KRB5CCNAME: /tmp/.cleanup_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   when:
     - _cleanup_kubeclusteradm_ca_exists.stdout == '1'
     - _cleanup_kubeclusteradm_ca_acl_exists.stdout == '1'
@@ -199,7 +224,7 @@
     set -o pipefail
     ipa ca-disable {{ ipa_kubeclusteradm_ca_name }}
   environment:
-    KRB5CCNAME: /tmp/.cleanup_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
   register: _cleanup_kubeclusteradm_ca_disable
   delegate_to: "{{ groups[idm_group] | first }}"
@@ -219,7 +244,7 @@
     set -o pipefail
     ipa ca-del {{ ipa_kubeclusteradm_ca_name }}
   environment:
-    KRB5CCNAME: /tmp/.cleanup_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
   when: _cleanup_kubeclusteradm_ca_exists.stdout == '1'
   register: _cleanup_kubeclusteradm_ca_del
   delegate_to: "{{ groups[idm_group] | first }}"

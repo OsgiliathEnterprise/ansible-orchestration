@@ -34,16 +34,17 @@
 # kadmin.local binds to the local KDB.)
 - name: Ipa-cert-renewal | pre-clear admin ticket scratch cache
   ansible.builtin.file:
-    path: /tmp/.renewal_admin.ccache
+    path: "{{ kube_scratch_cache_dir }}/admin.ca_acl.ccache"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  changed_when: false
 
 - name: Ipa-cert-renewal | acquire admin ticket into scratch cache
   community.general.krb_ticket:
     principal: admin
     password: "{{ company_realm_password }}"
-    cache_name: /tmp/.renewal_admin.ccache
+    cache_name: "{{ kube_scratch_cache_dir }}/admin.ca_acl.ccache"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
@@ -55,6 +56,7 @@
   vars:
     ipa_ca_acl_name: "kubernetes-ca-acl"
     ipa_ca_acl_host: "{{ item }}"
+    ipa_ca_acl_ccache: "{{ kube_scratch_cache_dir }}/admin.ca_acl.ccache"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Grant kubeclusteradm CA access to all hosts (host-principal renewal)
@@ -63,6 +65,7 @@
   vars:
     ipa_ca_acl_name: "{{ ipa_kubeclusteradm_ca_name }}-acl"
     ipa_ca_acl_host: "{{ item }}"
+    ipa_ca_acl_ccache: "{{ kube_scratch_cache_dir }}/admin.ca_acl.ccache"
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | probe kubeclusteradm keytab usability
@@ -77,17 +80,18 @@
   block:
     - name: Ipa-cert-renewal | pre-clear rotation probe scratch cache
       ansible.builtin.file:
-        path: /tmp/.kca_rotation_probe.ccache
+        path: "{{ kube_scratch_cache_dir }}/kubeclusteradm.rotation_probe.ccache"
         state: absent
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
+      changed_when: false
 
     - name: Ipa-cert-renewal | mint keytab ticket into scratch cache
       community.general.krb_ticket:
         keytab: true
-        keytab_path: /tmp/kubeclusteradm.keytab
+        keytab_path: "{{ kube_idm_keytab_path }}"
         principal: "{{ ipa_kube_admin_principal }}"
-        cache_name: /tmp/.kca_rotation_probe.ccache
+        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.rotation_probe.ccache"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
@@ -100,13 +104,28 @@
 # delete, then export the CURRENT key. Steady state: the probe passes and
 # both tasks are skipped — no keytab churn, and the one time they do run they
 # genuinely regenerate, so no blanket changed_when is needed.
+# The keytab's home on idm is the unit state directory (principals-in-place D5):
+# a root-only (0700) directory, not /tmp. Created before any operation that
+# reads or writes the keytab (probe handles absence by failing to the rescue;
+# ktadd would NOT create the parent directory).
+- name: Ipa-cert-renewal | ensure idm keytab state directory
+  ansible.builtin.file:
+    path: "{{ kube_unit_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  when: kube_masters_group in group_names
+
 - name: Ipa-cert-renewal | remove unusable keytab before re-export
   # ktadd APPENDS entries, so a stale entry left at the top of the file would
   # shadow the fresh key (kinit uses the first matching entry) — the file must
   # hold exactly the current key. Deletion is declarative here, not an inline
   # `rm -f` inside the export command.
   ansible.builtin.file:
-    path: /tmp/kubeclusteradm.keytab
+    path: "{{ kube_idm_keytab_path }}"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
@@ -136,7 +155,7 @@
   ansible.builtin.command:
     cmd: >-
       kadmin.local -q
-      "ktadd -norandkey -k /tmp/kubeclusteradm.keytab {{ ipa_kube_admin_principal }}@{{ company_domain | upper }}"
+      "ktadd -norandkey -k {{ kube_idm_keytab_path }} {{ ipa_kube_admin_principal }}@{{ company_domain | upper }}"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   register: kca_keytab_export
@@ -145,18 +164,36 @@
     - kube_masters_group in group_names
     - not (kca_rotation_keytab_usable | default(true))
 
-- name: Ipa-cert-renewal | Fetch keytab as base64
-  ansible.builtin.command: base64 -w0 /tmp/kubeclusteradm.keytab
+- name: Ipa-cert-renewal | lock down idm keytab permissions
+  # ktadd creates the file 0644 under the default umask; the keytab holds the
+  # kubeclusteradm long-term key, so it must be root-only. Unconditional
+  # (master-gated): `file: mode` is idempotent by construction and truthfully
+  # reports a change only when the mode (or ownership) actually differs, which
+  # also repairs a keytab exported by an older converge.
+  ansible.builtin.file:
+    path: "{{ kube_idm_keytab_path }}"
+    owner: root
+    group: root
+    mode: '0600'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | slurp kubeclusteradm keytab from idm
+  ansible.builtin.slurp:
+    src: "{{ kube_idm_keytab_path }}"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   no_log: "{{ secure_logs }}"
-  register: kca_keytab_b64
-  changed_when: false
+  register: kca_keytab_slurp
   when: kube_masters_group in group_names
 
 - name: Ipa-cert-renewal | Install kubeclusteradm keytab for admin cert renewal
+  # Master-local copy the kube-cert-renew.sh timer reads ($CRED_DIR/kubeclusteradm.keytab);
+  # the idm-side {{ kube_idm_keytab_path }} above is the source of truth kept in sync
+  # with the KDB.
   ansible.builtin.copy:
-    content: "{{ kca_keytab_b64.stdout | b64decode }}"
+    content: "{{ kca_keytab_slurp.content | b64decode }}"
     dest: "{{ kube_credential_folder }}/kubeclusteradm.keytab"
     owner: root
     group: root
@@ -164,6 +201,17 @@
   no_log: "{{ secure_logs }}"
   become: true
   when: kube_masters_group in group_names
+
+- name: Ipa-cert-renewal | remove legacy /tmp keytab location on idm
+  # The keytab moved to {{ kube_unit_state_dir }} (principals-in-place D5); the old
+  # /tmp location held a credential file and must not linger from earlier converges.
+  # file: state: absent is idempotent by construction, so no changed_when suppression
+  # is needed — a genuine removal reports changed, steady state reports ok.
+  ansible.builtin.file:
+    path: /tmp/kubeclusteradm.keytab
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
 
 # IPA's SAN-validation DNS precondition (zone discovery for IP SANs) is satisfied by the
 # scoped dual-nameserver resolved config that tcharl.freeipa_server / tcharl.ansible_securehost

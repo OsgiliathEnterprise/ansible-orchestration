@@ -5,8 +5,9 @@
 #   ipa_ca_ensure_name: lightweight CA name; the ACL is named "<name>-acl".
 #
 # Authentication: every task below is delegated to idm and consumes the
-# scratch admin ticket at /tmp/.ipa_k8s_ca_admin.ccache (minted fresh by
-# ipa-kubernetes-ca.yml before this chain runs) via env: KRB5CCNAME.
+# scratch admin ticket at {{ kube_scratch_cache_dir }}/admin.ca_provision.ccache
+# (minted fresh by ipa-kubernetes-ca.yml before this chain runs) via
+# env: KRB5CCNAME.
 #
 # `ipa <x>-show` exits rc=2 (NOT_FOUND) when the object is absent; any other
 # non-zero rc is a real failure. `ipa caacl-add-ca` is NOT idempotent (rc=1 "This
@@ -21,7 +22,7 @@
   changed_when: false
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
 
 - name: "Ipa-ca-ensure | create lightweight ca: {{ ipa_ca_ensure_name }}"
   ansible.builtin.command: >-
@@ -33,7 +34,7 @@
   changed_when: true
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
 
 - name: "Ipa-ca-ensure | check if ca acl exists: {{ ipa_ca_ensure_name }}"
   ansible.builtin.command: "ipa caacl-show {{ ipa_ca_ensure_name }}-acl"
@@ -44,17 +45,46 @@
   changed_when: false
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
 
 - name: "Ipa-ca-ensure | create ca access list: {{ ipa_ca_ensure_name }}"
-  ansible.builtin.command: "ipa caacl-add {{ ipa_ca_ensure_name }}-acl --usercat=all"
+  ansible.builtin.command: "ipa caacl-add {{ ipa_ca_ensure_name }}-acl --usercat=all --servicecat=all"
   when: ipa_ca_ensure_acl.rc == 2
   delegate_to: "{{ groups[idm_group] | first }}"
   no_log: "{{ secure_logs }}"
   changed_when: true
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
+
+# A cert request authenticated as a host principal is checked against the CA
+# ACL on BOTH sides: the authenticated host (covered by the host grants in
+# ipa-ca-acl-prejoin.yml / ipa-cert-renewal.yml) and the certificate's own
+# principal. Service-style principals (HTTP/<host>, host/<host>) must match a
+# rule criterion too — `--servicecat=all` — or enrollment dies with
+# "Principal 'HTTP/...' is not permitted to use CA ... with profile ...".
+# (The pre-change flow authenticated as admin, which bypasses CA ACLs
+# entirely, so the criterion was never needed before.) caacl-mod is not
+# idempotent (rc=1 when the attribute is already set), so it is gated on a
+# read-only caacl-show. This also heals ACLs that persist across destroy
+# with only --usercat=all from earlier role versions.
+- name: "Ipa-ca-ensure | ensure service category on ca-acl: {{ ipa_ca_ensure_name }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ipa caacl-show {{ ipa_ca_ensure_name }}-acl --all | grep -q "^ *Service category: all"; then
+      echo "SERVICECAT-PRESENT"
+    else
+      ipa caacl-mod {{ ipa_ca_ensure_name }}-acl --servicecat=all
+      echo "SERVICECAT-SET"
+    fi
+  register: ipa_ca_ensure_servicecat
+  when: ipa_ca_ensure_acl.rc == 0
+  delegate_to: "{{ groups[idm_group] | first }}"
+  no_log: "{{ secure_logs }}"
+  changed_when: "'SERVICECAT-SET' in ipa_ca_ensure_servicecat.stdout"
+  become: true
+  environment:
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
 
 # The ACL persists across destroy (delete-ipa-cleanup.yml keeps it and only
 # deletes CA #2), so the ACL may exist while the recreated CA is not a member.
@@ -73,4 +103,4 @@
   changed_when: "'CA-ACL-ADDED' in ipa_ca_ensure_acl_add.stdout"
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_k8s_ca_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"

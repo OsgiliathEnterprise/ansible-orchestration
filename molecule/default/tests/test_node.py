@@ -41,6 +41,14 @@ def test_node_client_key_exists(host):
     assert f.is_file
 
 
+def test_node_client_key_is_root_only(host):
+    """The private key was generated on the node (never shuttled off-host), so it
+    stays root-owned 0600 — the principals-in-place invariant for node keys."""
+    f = host.file("/etc/kubernetes/pki/node-client.key")
+    assert f.user == "root"
+    assert f.mode == 0o600
+
+
 def test_node_client_cert_has_node_identity(host):
     """The client cert subject is a node identity (CN=system:node:<host>), not admin."""
     with host.sudo():
@@ -48,6 +56,17 @@ def test_node_client_cert_has_node_identity(host):
             "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -subject"
         )
     assert 'system:node' in cmd.stdout
+
+
+def test_node_client_cert_subject_organization(host):
+    """The kubernetesNodes profile builds the subject with organization O=system:nodes
+    (the CSR carries O=system:nodes and CN=<hostname>; the profile adds the
+    system:node: prefix to the CN)."""
+    with host.sudo():
+        cmd = host.run(
+            "openssl x509 -in /etc/kubernetes/pki/node-client.crt -noout -subject"
+        )
+    assert 'O = system:nodes' in cmd.stdout or 'O=system:nodes' in cmd.stdout
 
 
 def test_node_client_cert_signed_by_kubeclusteradm_ca(host):

@@ -62,3 +62,18 @@ calico_recovery_rollout_delay: 10
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
 vault_kube_admin_password: "KubeClusterAdm2026"
 orchestration_kube_port: 6443
+# --- Kerberos credential conventions (principals-in-place) ------------------
+# Root-only (0700, tmpfs-backed) directory for scratch Kerberos credential
+# caches, created by tasks/requirements.yml. Every community.general.krb_ticket
+# task writes "<principal>.<purpose>.ccache" here — the name encodes the
+# Kerberos identity and its purpose, never the calling task file — and is
+# pre-cleared before acquisition so a stale ticket can never be reused.
+kube_scratch_cache_dir: /run/krb5cc
+# systemd StateDirectory of the kube-cert-renew unit: the unit-scoped ticket
+# cache (Environment=KRB5CCNAME=FILE:<dir>/ccache) and the master-side copy of
+# the kubeclusteradm renewal keytab live here — the timer never touches /tmp.
+kube_unit_state_dir: /var/lib/kube-cert-renew
+# Canonical location of the kubeclusteradm renewal keytab on the IPA server
+# (0600 root, exported by ipa-cert-renewal.yml with kadmin.local ktadd there);
+# the master's copy under kube_credential_folder is slurp+copy from this file.
+kube_idm_keytab_path: "{{ kube_unit_state_dir }}/kubeclusteradm.keytab"

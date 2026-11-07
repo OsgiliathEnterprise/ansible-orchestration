@@ -88,7 +88,7 @@
 
 - name: Admin-user | pre-clear admin-cert ticket scratch cache (on idm)
   ansible.builtin.file:
-    path: /tmp/.admin_user_admin.ccache
+    path: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
@@ -96,18 +96,21 @@
   when: not kube_admin_cert_stat.stat.exists
 
 - name: Admin-user | mint enrollment ticket into scratch cache (on idm)
-  # Keytab first: kubeclusteradm's keytab is already exported by
-  # ipa-kube-admin-credential.yml, which main.yml orders before this file, so
-  # the steady-state identity requests its own certificate. A rotated/missing
-  # keytab fails the mint and the rescue falls back to the admin password
-  # ticket (same convention as ipa-kube-admin-credential.yml's probes).
+  # Keytab first: the steady-state identity requests its own certificate with the
+  # kubeclusteradm keytab exported by ipa-cert-renewal.yml on a previous converge
+  # (it lives at {{ kube_idm_keytab_path }}, root-only in the unit state directory).
+  # On the fresh-install path the keytab does not exist yet (ipa-cert-renewal.yml
+  # runs later in the converge), so the mint fails and the rescue falls back to the
+  # admin password ticket (same convention as ipa-kube-admin-credential.yml's
+  # probes). The cache name records the primary identity (kubeclusteradm); the
+  # rescue re-uses the same file for the admin-identity fallback.
   block:
     - name: Admin-user | mint kubeclusteradm keytab ticket
       community.general.krb_ticket:
         keytab: true
-        keytab_path: /tmp/kubeclusteradm.keytab
+        keytab_path: "{{ kube_idm_keytab_path }}"
         principal: "{{ ipa_kube_admin_principal }}"
-        cache_name: /tmp/.admin_user_admin.ccache
+        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
@@ -117,7 +120,7 @@
       community.general.krb_ticket:
         principal: admin
         password: "{{ company_realm_password }}"
-        cache_name: /tmp/.admin_user_admin.ccache
+        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       no_log: "{{ secure_logs }}"
@@ -163,7 +166,7 @@
   become: true
   no_log: "{{ secure_logs }}"
   environment:
-    KRB5CCNAME: /tmp/.admin_user_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
   when: not kube_admin_cert_stat.stat.exists
 
 - name: Admin-user | slurp enrolled admin client cert from idm

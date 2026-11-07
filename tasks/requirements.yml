@@ -1,4 +1,35 @@
 ---
+# Ticketing convention: this role never acquires Kerberos tickets with shell
+# kinit (nor klist/kdestroy). Ticket acquisition runs through the native
+# community.general.krb_ticket module into root-only scratch caches under
+# {{ kube_scratch_cache_dir }} (created below), named
+# <principal>.<purpose>.ccache and pre-cleared before every acquisition. The
+# directory is created here, before any play can reach a ticketing task — on
+# every targeted host AND on the IPA server: krb_ticket shells to `kinit -c`,
+# which cannot create the cache's parent directory, and idm is never a play
+# target of this role, so the idm-side copy must be created by delegation.
+# (delete-ipa-cleanup.yml, which runs before this file on the reset_kube path,
+# carries the same task at its top for the cleanup ticket.)
+
+- name: Requirements | create scratch Kerberos credential cache directory
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  become: true
+
+- name: Requirements | create scratch Kerberos credential cache directory on idm
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  delegate_to: "{{ groups[idm_group] | first }}"
+  run_once: true
+  become: true
 
 - name: Requirements | import swap role
   ansible.builtin.import_role:
