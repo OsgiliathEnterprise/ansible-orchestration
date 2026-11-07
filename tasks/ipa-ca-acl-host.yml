@@ -7,12 +7,15 @@
 # grants must be explicit) and the add runs only when the host is missing.
 #
 # Include with vars:
-#   ipa_ca_acl_name:  CA ACL name (e.g. `kubernetes-ca-acl` or `{{ ca_name }}-acl`).
-#   ipa_ca_acl_host:  host to grant (exact inventory host name).
+#   ipa_ca_acl_name:   CA ACL name (e.g. `kubernetes-ca-acl` or `{{ ca_name }}-acl`).
+#   ipa_ca_acl_host:   host to grant (exact inventory host name).
+#   ipa_ca_acl_ccache: scratch admin ticket the delegated session authenticates
+#                      with (e.g. {{ kube_scratch_cache_dir }}/admin.ca_acl.ccache).
 #
-# Authentication: the delegated idm session consumes the scratch admin ticket
-# at /tmp/.renewal_admin.ccache via environment: KRB5CCNAME — the sole caller,
-# ipa-cert-renewal.yml, mints it fresh (pre-cleared, from
+# Authentication: the delegated idm session consumes the caller-provisioned
+# scratch admin ticket via environment: KRB5CCNAME. The callers
+# (ipa-ca-acl-prejoin.yml for the pre-join grant, ipa-cert-renewal.yml for the
+# steady-state re-assert) mint it fresh (pre-cleared, from
 # company_realm_password) before the loops that include this file. The include
 # therefore must not be called without that ticket in place.
 
@@ -31,4 +34,4 @@
   register: ipa_ca_acl_host_result
   changed_when: "'ACL-GRANT-ADDED' in ipa_ca_acl_host_result.stdout"
   environment:
-    KRB5CCNAME: /tmp/.renewal_admin.ccache
+    KRB5CCNAME: "{{ ipa_ca_acl_ccache }}"

@@ -5,4 +5,10 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+# Unit-scoped ticket cache: kinit in the script writes here (the default would be
+# /tmp/krb5cc_0, an ambient per-UID cache — principals-in-place D1). StateDirectory=
+# creates {{ kube_unit_state_dir }} (root-owned) before ExecStart; the script
+# pre-clears the cache so a stale/expired ticket is never reused.
+StateDirectory={{ kube_unit_state_dir | basename }}
+Environment=KRB5CCNAME=FILE:{{ kube_unit_state_dir }}/ccache
 ExecStart=/usr/local/sbin/kube-cert-renew.sh

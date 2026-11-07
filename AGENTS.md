@@ -57,6 +57,7 @@ main.yml
 |-- ipa-certs.yml                 [kube_masters_group]
 |   |-- ipa-kubernetes-ca.yml     (CA #1: serving cert / trust anchor)
 |   |-- ipa-kubeclusteradm-ca.yml (CA #2: client certs)
+|   |-- ipa-ca-acl-prejoin.yml    (pre-join CA ACL grants; -> ipa-ca-acl-host.yml)
 |   |-- ipa-master.yml
 |   |-- ipa-api-server.yml
 |   |-- ipa-front-proxy.yml
@@ -64,13 +65,14 @@ main.yml
 |   |-- ipa-controller-manager-client.yml
 |   |-- ipa-scheduler-client.yml
 |-- kube-install-join-node.yml    [kube_nodes_group]
-|   |-- kube-node-cert.yml        (per-node client cert from the kubeclusteradm CA #2)
+|   |-- kube-node-cert.yml        (node-local: own host-keytab ticket + key/CSR + ipacert on CA #2)
 |-- ipa-kube-admin-credential.yml [kube_masters_group; keytab-first + password fallback]
 |-- admin-user.yml                [kube_masters_group; CA #2 cert + admin.conf re-embed + kubectl get nodes verification]
 |-- ipa-pki-swap.yml              [kube_masters_group]
 |   |-- calico-ca-recovery.yml    (no-op when Calico is not installed)
 |-- kube-firewall.yml             [kube_masters_group or kube_nodes_group]
 |-- ipa-cert-renewal.yml          [kube_masters_group or kube_nodes_group]
+|   |-- ipa-ca-acl-host.yml       (steady-state CA ACL re-assert for renewal identities)
 |-- nfs-mountpoints.yml           [kube_masters_group + nfs_mountpoints]
     |-- _server-inner.yml
         |-- persistent-volume.yml (k8s PV; delegate_to master)
@@ -84,9 +86,32 @@ Admin credential ordering: `ipa-pki-swap.yml`'s verification gates (KCM lease, s
 
 This role never uses shell `kinit` or the ambient per-user ticket cache (`~/.k5.<user>`):
 
-- **Scratch caches** — ticket acquisition is a `community.general.krb_ticket` task into a per-purpose scratch cache under `/tmp` (pre-cleared first, so a stale/expired ticket can never be reused). Downstream `ipa` consumers — including idm-delegated ones — inherit the cache via `env: KRB5CCNAME`.
-- **Keytab usability probes** — keytab-first flows probe with a block/rescue `krb_ticket` into a scratch cache (`kca_keytab_usable`); a rotated keytab fails the probe and the flow falls back to the admin password.
-- **Native keytab export** — the `kubeclusteradm` keytab is exported with `community.general.ipa_getkeytab` (LDAP bind via `bind_dn`/`bind_pw`, `force: true`) — no ticket needed, replace-not-append.
+- **Scratch caches** — ticket acquisition is a `community.general.krb_ticket` task into a
+  per-purpose scratch cache `{{ kube_scratch_cache_dir }}/<principal>.<purpose>.ccache`
+  (`/run/krb5cc`, root-only `0700`; pre-cleared first, so a stale/expired ticket can never
+  be reused). Downstream `ipa`/`ipacert` consumers — including idm-delegated ones — inherit
+  the cache via `env: KRB5CCNAME`. `krb_ticket` shells to `kinit -c` and cannot create the
+  cache's parent directory: `requirements.yml` creates the directory on every targeted host
+  **and on idm by delegation** (idm is never a play target), and `delete-ipa-cleanup.yml` —
+  which runs before requirements on the `reset_kube` path — carries the same delegated task
+  at its top.
+- **Keytab usability probes** — keytab-first flows probe with a block/rescue `krb_ticket`
+  into a scratch cache (`kca_keytab_usable`); a rotated keytab fails the probe and the flow
+  falls back to the admin password.
+- **Native keytab export** — the `kubeclusteradm` keytab is exported on idm with
+  `kadmin.local -q "ktadd -norandkey -k {{ kube_idm_keytab_path }} ..."` (non-rotating,
+  writes directly to the unit state directory). The file must be deleted before a
+  re-export because `ktadd` appends, and it is created 0644 — a follow-up `file` task
+  locks it down to root-only 0600. The master's copy under `{{ kube_credential_folder }}`
+  is shuttled with `slurp` + `copy: content:` (no base64-in-stdout).
+- **Cert enrollment is host-local** — each node mints its own ticket from its own
+  `/etc/krb5.keytab` (`host/<hostname>`) and runs its own `ipacert` enrollment locally
+  (`kube-node-cert.yml` on workers, the cert files plus `kube-cert-renew.sh` on the
+  master). The admin password never authenticates to the IPA API from a kube host:
+  admin-identity module calls are delegated to idm.
+- **Systemd timer tickets** — `kube-cert-renew.service` sets `StateDirectory=kube-cert-renew`
+  and `Environment=KRB5CCNAME=FILE:/var/lib/kube-cert-renew/ccache`; the script pre-clears
+  that cache so a stale ticket is never reused.
 - Ticket tasks report no change (the scratch cache is ephemeral state, not configuration).
 
 ## Execution

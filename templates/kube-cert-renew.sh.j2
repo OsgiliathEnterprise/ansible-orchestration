@@ -20,6 +20,14 @@ set -euo pipefail
 LOG_FILE=/var/log/kube-cert-renew.log
 exec >>"$LOG_FILE" 2>&1
 
+# Pre-clear the unit-scoped ticket cache (KRB5CCNAME is set by the systemd unit to
+# FILE:{{ kube_unit_state_dir }}/ccache) so a stale/expired ticket can never be
+# reused; every request() below kinit's fresh from its keytab. Derive the path from
+# KRB5CCNAME so an operator override is cleared too; fall back to the unit's path.
+CCACHE_PATH="${KRB5CCNAME:-FILE:}"
+CCACHE_PATH="${CCACHE_PATH:-{{ kube_unit_state_dir }}/ccache}"
+rm -f "$CCACHE_PATH"
+
 HOSTNAME="{{ orchestration_host_hostname }}"
 DOMAIN="{{ company_domain }}"
 PKI_DIR="{{ kubernetes_certificates_path | regex_replace('/+$', '') }}"

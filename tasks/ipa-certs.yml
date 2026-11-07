@@ -14,28 +14,6 @@
 #   ca.crt.kubeadm for --cluster-signing-cert-file (CSR-based signing); it is
 #   no longer part of the bundle.
 
-# Safeguard: mint the host keytab ticket into a dedicated scratch cache
-# (pre-cleared, so a stale/expired cache can never be reused). No consumer on
-# this host reads a Kerberos ticket: every shell `ipa` task in the CA chain
-# (ipa-ca-ensure.yml, ipa-ca-profile.yml, ipa-ca-link-profile.yml) is delegated
-# to idm and authenticates with idm's scratch admin ticket (minted by
-# ipa-kubernetes-ca.yml). The task is retained so a host keytab breakage
-# surfaces at the top of the flow rather than mid-chain.
-# changed_when: false — the scratch cache is ephemeral state, not configuration.
-- name: Ipa-certs | pre-clear host ticket scratch cache
-  ansible.builtin.file:
-    path: /tmp/.ipa_certs_host.ccache
-    state: absent
-  become: true
-
-- name: Ipa-certs | acquire host keytab ticket into scratch cache
-  community.general.krb_ticket:
-    keytab: true
-    keytab_path: /etc/krb5.keytab
-    cache_name: /tmp/.ipa_certs_host.ccache
-  become: true
-  changed_when: false
-
 - name: Ipa-certs | create kubernetes pki directory
   ansible.builtin.file:
     path: "{{ kubernetes_certificates_path }}"
@@ -60,21 +38,29 @@
 - name: "Ipa-certs | delegate kubeclusteradm CA (CA #2) creation to IPA"
   ansible.builtin.include_tasks: ipa-kubeclusteradm-ca.yml
 
+# Host grants must precede every self-enrollment in this play (design D3):
+# usercat=all covers users only, so host-principal enrollment against CA #1 /
+# CA #2 fails without an explicit caacl host membership. ipa-cert-renewal.yml
+# re-asserts the same grants later as the steady-state pass.
+- name: Ipa-certs | apply CA ACL host grants before any self-enrollment
+  ansible.builtin.include_tasks: ipa-ca-acl-prejoin.yml
+
 # Scratch admin ticket for the two CA downloads below: the consumers get the
 # cache via env: KRB5CCNAME instead of an in-shell `kinit admin` into the
 # shared ambient cache. Pre-cleared so a stale/expired ticket is never reused;
 # changed_when: false — the scratch cache is ephemeral state.
 - name: Ipa-certs | pre-clear admin ticket scratch cache
   ansible.builtin.file:
-    path: /tmp/.ipa_certs_admin.ccache
+    path: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
     state: absent
   become: true
+  changed_when: false
 
 - name: Ipa-certs | acquire admin ticket into scratch cache
   community.general.krb_ticket:
     principal: admin
     password: "{{ company_realm_password }}"
-    cache_name: /tmp/.ipa_certs_admin.ccache
+    cache_name: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
   become: true
   no_log: "{{ secure_logs }}"
   changed_when: false
@@ -86,7 +72,7 @@
   changed_when: false
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_certs_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
 
 - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA"
   ansible.builtin.shell: |
@@ -95,7 +81,7 @@
   changed_when: false
   become: true
   environment:
-    KRB5CCNAME: /tmp/.ipa_certs_admin.ccache
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
 
 - name: Ipa-certs | verify ca.crt.new fingerprint matches expected IPA CA
   ansible.builtin.shell: |

@@ -8,16 +8,17 @@
 # is never reused; changed_when: false — the scratch cache is ephemeral state.
 - name: Ipa-kubernetes-ca | pre-clear admin ticket scratch cache
   ansible.builtin.file:
-    path: /tmp/.ipa_k8s_ca_admin.ccache
+    path: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
+  changed_when: false
 
 - name: Ipa-kubernetes-ca | acquire admin ticket into scratch cache
   community.general.krb_ticket:
     principal: admin
     password: "{{ company_realm_password }}"
-    cache_name: /tmp/.ipa_k8s_ca_admin.ccache
+    cache_name: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
   delegate_to: "{{ groups[idm_group] | first }}"
   changed_when: false
   become: true
