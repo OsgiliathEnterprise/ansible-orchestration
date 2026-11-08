@@ -24,15 +24,15 @@
 - name: Ipa-pki-swap | patch kubelet.conf server URL to use hostname for TLS verification
   ansible.builtin.replace:
     path: /etc/kubernetes/kubelet.conf
-    regexp: 'server: https://[\d.]+:6443'
-    replace: 'server: https://{{ orchestration_host_hostname }}:6443'
+    regexp: 'server: https://[\d.]+:{{ orchestration_kube_port }}'
+    replace: 'server: https://{{ orchestration_host_hostname }}:{{ orchestration_kube_port }}'
   become: true
 
 - name: Ipa-pki-swap | patch admin.conf server URL to use hostname for TLS verification
   ansible.builtin.replace:
     path: /etc/kubernetes/admin.conf
-    regexp: 'server: https://[\d.]+:6443'
-    replace: 'server: https://{{ orchestration_host_hostname }}:6443'
+    regexp: 'server: https://[\d.]+:{{ orchestration_kube_port }}'
+    replace: 'server: https://{{ orchestration_host_hostname }}:{{ orchestration_kube_port }}'
   become: true
 
 # pki-swap only patches kubeconfigs, server URLs and file readability — it never touches the
@@ -106,7 +106,7 @@
     block: |
       apiServerOverride:
         certAuthority: /etc/kubernetes/pki/ca.crt
-        url: https://{{ orchestration_host_hostname }}:6443
+        url: https://{{ orchestration_host_hostname }}:{{ orchestration_kube_port }}
   become: true
   register: kubelet_config_override
 
