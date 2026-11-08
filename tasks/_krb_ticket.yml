@@ -61,7 +61,7 @@
   become: true
   changed_when: false
 
-- name: "Krb-ticket | acquire {{ krb_ticket_principal }} ticket (keytab) into scratch cache"
+- name: "Krb-ticket | acquire ticket (keytab) into scratch cache {{ krb_ticket_principal }}"
   community.general.krb_ticket:
     keytab: true
     keytab_path: "{{ krb_ticket_keytab_path }}"
@@ -72,7 +72,7 @@
   changed_when: false
   when: krb_ticket_keytab_path is defined
 
-- name: "Krb-ticket | acquire {{ krb_ticket_principal }} ticket (password) into scratch cache"
+- name: "Krb-ticket | acquire ticket (password) into scratch cache {{ krb_ticket_principal }}"
   community.general.krb_ticket:
     principal: "{{ krb_ticket_principal }}"
     password: "{{ krb_ticket_password }}"
