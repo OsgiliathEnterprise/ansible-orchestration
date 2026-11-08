@@ -68,29 +68,12 @@
   when: scheduler_swap_needed
 
 # The master owns this certificate's identity, so it authenticates the request
-# with its own host ticket (C3): minted from the master's /etc/krb5.keytab into
-# a pre-cleared scratch cache, consumed via KRB5CCNAME — no ipaadmin_password
-# on the wire. The CA #2 ACL (kubeclusteradm-acl, usercat=all + host grants)
-# authorizes the host principal; this is the same identity the renewal script
-# (kube-cert-renew.sh) already uses to renew this certificate.
-- name: Ipa-scheduler-client | pre-clear master host ticket scratch cache
-  ansible.builtin.file:
-    path: "{{ kube_scratch_cache_dir }}/host_master.scheduler.ccache"
-    state: absent
-  become: true
-  changed_when: false
-  when: scheduler_swap_needed
-
-- name: Ipa-scheduler-client | acquire master host ticket from the host keytab
-  community.general.krb_ticket:
-    keytab: true
-    keytab_path: /etc/krb5.keytab
-    principal: "host/{{ orchestration_host_hostname }}"
-    cache_name: "{{ kube_scratch_cache_dir }}/host_master.scheduler.ccache"
-  become: true
-  changed_when: false
-  when: scheduler_swap_needed
-
+# with its own host ticket (C3): the shared phase ticket minted once by
+# ipa-certs.yml from the master's /etc/krb5.keytab (design D2), inherited via
+# env: KRB5CCNAME — no ipaadmin_password on the wire. The CA #2 ACL
+# (kubeclusteradm-acl, usercat=all + host grants) authorizes the host principal;
+# this is the same identity the renewal script (kube-cert-renew.sh) already uses
+# to renew this certificate.
 - name: "Ipa-scheduler-client | request scheduler certificate from the kubeclusteradm CA (CA #2)"
   freeipa.ansible_freeipa.ipacert:
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
@@ -102,7 +85,7 @@
   no_log: "{{ secure_logs }}"
   become: true
   environment:
-    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/host_master.scheduler.ccache"
+    KRB5CCNAME: "{{ kube_cert_enroll_ccache }}"
   when: scheduler_swap_needed
 
 # --- re-embed into the static-pod conf file ---

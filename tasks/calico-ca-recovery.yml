@@ -13,6 +13,12 @@
 # reach Ready on a Ready node, so without the gate the cluster-wide rollout wait would absorb
 # the workers' still-in-progress convergence on the order-tolerant play (master and workers run
 # in one pass) and burn the rollout budget on cross-host waiting instead of CNI initialisation.
+#
+# When phase 1 of the decoupled rollout wait times out, the escalation is two-stage: it first
+# restarts the Calico control plane (deletes the calico-typha and calico-kube-controllers pods,
+# label-discovered, opt-out via calico_recovery_restart_typha) and then deletes the stuck
+# calico-node pods, so recreated pods register against a fresh typha - the proven recovery for
+# the stale-typha confd-starvation flake (bird.cfg never rendered, calico-node stuck 0/1).
 
 - name: Calico-ca-recovery | detect calico-node DaemonSet (no-op if Calico absent)
   kubernetes.core.k8s_info:
@@ -99,7 +105,8 @@
       # at pod-creation), the DaemonSet controller cannot progress past the reverted
       # maxUnavailable and no liveness probe restarts the container: an in-task wait only burns
       # the budget and fails. The rollout wait is decoupled into the two poll phases below; the
-      # escalation between them deletes stuck pods, and deleted pods are recreated immediately
+      # escalation between them restarts the Calico control plane (typha + kube-controllers, when
+      # enabled) and deletes stuck pods, and deleted pods are recreated immediately
       # by the DaemonSet controller on a path that is NOT gated by updateStrategy - so recovery
       # no longer depends on winning the race with the operator.
       kubernetes.core.k8s:
@@ -195,6 +202,76 @@
                 | rejectattr('metadata.deletionTimestamp', 'defined') | list)
               | rejectattr('metadata.name', 'in', calico_ready_pod_names | default([]))
               | map(attribute='metadata.name') | list }}
+
+    - name: Calico-ca-recovery | discover calico-typha pods for the control-plane restart escalation
+      # Guarded by the phase-1 outcome (same condition as the phase-2 poll): the restart is a
+      # failure-path action only - a green phase 1 never touches the Calico control plane.
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        label_selectors:
+          - "k8s-app=calico-typha"
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_typha_pods
+      when: calico_rollout_pods.failed | default(false) and calico_recovery_restart_typha | bool
+
+    - name: Calico-ca-recovery | discover calico-kube-controllers pod for the control-plane restart escalation
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        label_selectors:
+          - "k8s-app=calico-kube-controllers"
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      register: calico_controllers_pods
+      when: calico_rollout_pods.failed | default(false) and calico_recovery_restart_typha | bool
+
+    - name: Calico-ca-recovery | escalate by restarting the Calico control plane (typha + kube-controllers)
+      # Measured failure mode (parallels 2026-11-07): a stale calico-typha replica starves confd in
+      # the fresh calico-node pods - confd logs "Skipping confd config file", never renders
+      # /etc/calico/confd/config/bird.cfg, and BIRD dies ("Unable to open configuration file"), so
+      # deleting only the stuck calico-node pods re-wedges the recreated pod against the same
+      # starved typha. Deleting the typha pods (and kube-controllers) makes their controllers
+      # recreate them with a fresh watch cache; the proven recovery (fresh pod Ready in ~45s).
+      # Runs BEFORE the stuck calico-node deletions so recreated node pods register against a
+      # healthy typha on their first attempt. wait: false: the Deployment/ReplicaSet controllers
+      # recreate asynchronously; the phase-2 calico-node readiness poll is the effective barrier
+      # (a Ready calico-node requires a serving typha, since confd must have rendered bird.cfg).
+      # Empty discovery list (typha-less install, or opted out) -> loop skipped -> no-op.
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        namespace: calico-system
+        name: "{{ item.metadata.name }}"
+        state: absent
+        wait: false
+        kubeconfig: "{{ kube_config_path }}"
+        context: kubernetes-admin@kubernetes
+      become: true
+      loop: >-
+        {{ (calico_typha_pods.resources | default([]) | list)
+           + (calico_controllers_pods.resources | default([]) | list) }}
+      loop_control:
+        label: "{{ item.metadata.name | default('<unnamed>') }}"
+      when: calico_rollout_pods.failed | default(false) and calico_recovery_restart_typha | bool
+
+    - name: Calico-ca-recovery | record escalation depth for the failure report
+      # Names which escalation actually ran, so a failure report distinguishes a control-plane
+      # restart attempt from a pod-deletion-only one. default('none') in the fail message covers
+      # failures that never reached the escalation (all-nodes Ready gate, green phase 1).
+      ansible.builtin.set_fact:
+        calico_recovery_escalation: >-
+          {{ 'typha-restart'
+             if (calico_recovery_restart_typha | bool
+                 and ((calico_typha_pods.resources | default([]) | count)
+                      + (calico_controllers_pods.resources | default([]) | count)) > 0)
+             else 'pod-delete' }}
+      when: calico_rollout_pods.failed | default(false)
 
     - name: Calico-ca-recovery | escalate by deleting calico-node pods stuck not-Ready
       # Deleting a pod releases the DaemonSet controller to recreate it immediately on the
@@ -399,7 +476,8 @@
         # ..._delay, plus the deletion escalation between them) once set.
         msg: >-
           calico-node CA recovery did not complete (phase:
-          {{ calico_recovery_phase | default('all-nodes Ready gate') }});
+          {{ calico_recovery_phase | default('all-nodes Ready gate') }},
+          escalation: {{ calico_recovery_escalation | default('none') }});
           nodes without a Ready calico-node pod:
           {{ (cluster_nodes.resources | default([]) | map(attribute='metadata.name') | list
              | reject('in', ready_node_names | default([])) | list)

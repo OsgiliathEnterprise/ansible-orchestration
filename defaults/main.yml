@@ -53,12 +53,21 @@ calico_recovery_max_unavailable: "100%"
 calico_recovery_nodes_ready_retries: 30
 calico_recovery_nodes_ready_delay: 10
 # Per-phase budget for the decoupled calico-node rollout wait (tasks/calico-ca-recovery.yml):
-# phase 1 polls pod readiness after the trigger patch; on timeout it escalates by deleting the
-# stuck pods (recreation is not gated by updateStrategy, so the tigera operator's revert of our
+# phase 1 polls pod readiness after the trigger patch; on timeout it escalates by restarting the
+# Calico control plane (see calico_recovery_restart_typha) and deleting the stuck pods
+# (recreation is not gated by updateStrategy, so the tigera operator's revert of our
 # maxUnavailable cannot stall it) and phase 2 re-polls with the same budget. 18 x 10s covers the
 # measured ~45-90s parallel/serial restart plus one kubelet StartError back-off cycle.
 calico_recovery_rollout_retries: 18
 calico_recovery_rollout_delay: 10
+# Escalation toggle (tasks/calico-ca-recovery.yml): when phase 1 times out with calico-node pods
+# still stuck, the escalation also deletes the calico-typha and calico-kube-controllers pods (by
+# label discovery, no-op when absent) BEFORE deleting the stuck pods, so their controllers
+# recreate them with a fresh watch cache. Recovers from the stale-typha confd-starvation flake
+# (confd never renders bird.cfg -> BIRD dies -> calico-node stuck 0/1, proven recovery ~45s);
+# deleting only the stuck pods re-wedges the recreated pod against the same starved typha.
+# Set to false to restore the pod-deletion-only escalation.
+calico_recovery_restart_typha: true
 kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification,UnableRemovePodCIDR"
 vault_kube_admin_password: "KubeClusterAdm2026"
 orchestration_kube_port: 6443
@@ -69,6 +78,12 @@ orchestration_kube_port: 6443
 # Kerberos identity and its purpose, never the calling task file — and is
 # pre-cleared before acquisition so a stale ticket can never be reused.
 kube_scratch_cache_dir: /run/krb5cc
+# Shared host ticket for the cert-enrollment phase (design D2): minted once by
+# tasks/ipa-certs.yml through tasks/_krb_ticket.yml (principal host/<master>
+# -> slug host_master, purpose cert_enroll). The ipacert consumers in the five
+# master cert files inherit it via env: KRB5CCNAME instead of minting their
+# own per-file ticket.
+kube_cert_enroll_ccache: "{{ kube_scratch_cache_dir }}/host_master.cert_enroll.ccache"
 # systemd StateDirectory of the kube-cert-renew unit: the unit-scoped ticket
 # cache (Environment=KRB5CCNAME=FILE:<dir>/ccache) and the master-side copy of
 # the kubeclusteradm renewal keytab live here — the timer never touches /tmp.

@@ -22,25 +22,17 @@
     # Scratch admin ticket for the two idm-delegated `ipa` consumers below
     # (profile gate + CA fetch): they get the cache via env: KRB5CCNAME
     # instead of an in-shell `kinit admin` into the shared ambient cache.
-    # Pre-cleared so a stale/expired ticket is never reused; changed_when:
-    # false — the scratch cache is ephemeral state.
-    - name: Kube-install-join | pre-clear admin ticket scratch cache
-      ansible.builtin.file:
-        path: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
-        state: absent
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      changed_when: false
-
-    - name: Kube-install-join | acquire admin ticket into scratch cache
-      community.general.krb_ticket:
-        principal: admin
-        password: "{{ company_realm_password }}"
-        cache_name: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      no_log: "{{ secure_logs }}"
-      changed_when: false
+    # The shared include pre-clears the cache and mints the ticket
+    # (changed_when: false — the scratch cache is ephemeral state); it must
+    # mint on idm because KRB5CCNAME resolves on the host running the `ipa`
+    # commands, which are themselves delegated to idm.
+    - name: Kube-install-join | mint admin ticket for the join gates
+      ansible.builtin.include_tasks: _krb_ticket.yml
+      vars:
+        krb_ticket_principal: admin
+        krb_ticket_password: "{{ company_realm_password }}"
+        krb_ticket_cache_purpose: node_join
+        krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
 
     # --- Gate: the CA + per-node profile must exist in FreeIPA before the CA fetch (design D1) ---
     # The CA is created before the profile, so passing this gate guarantees the fetch succeeds.

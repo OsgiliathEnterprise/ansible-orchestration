@@ -45,43 +45,104 @@
 - name: Ipa-certs | apply CA ACL host grants before any self-enrollment
   ansible.builtin.include_tasks: ipa-ca-acl-prejoin.yml
 
-# Scratch admin ticket for the two CA downloads below: the consumers get the
-# cache via env: KRB5CCNAME instead of an in-shell `kinit admin` into the
-# shared ambient cache. Pre-cleared so a stale/expired ticket is never reused;
-# changed_when: false — the scratch cache is ephemeral state.
-- name: Ipa-certs | pre-clear admin ticket scratch cache
-  ansible.builtin.file:
-    path: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
-    state: absent
-  become: true
-  changed_when: false
+# CA downloads run as admin ON idm (design D1): both `ipa ca-show
+# --certificate-out` consumers execute delegated to the FreeIPA server, and
+# only the fetched certificate bytes are shuttled to the master via slurp +
+# copy: content. The realm admin password never reaches a kube host — the
+# ticket is minted idm-local through the shared include (D4: pre-cleared
+# scratch cache, changed_when: false; no_log derived from secure_logs). The
+# fingerprint verification below stays master-local: it reads the installed
+# file and needs no ticket.
+- name: Ipa-certs | acquire admin ticket into scratch cache (idm-local)
+  ansible.builtin.include_tasks: _krb_ticket.yml
+  vars:
+    krb_ticket_principal: admin
+    krb_ticket_cache_purpose: ca_download
+    krb_ticket_password: "{{ company_realm_password }}"
+    krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
 
-- name: Ipa-certs | acquire admin ticket into scratch cache
-  community.general.krb_ticket:
-    principal: admin
-    password: "{{ company_realm_password }}"
-    cache_name: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
-  become: true
-  no_log: "{{ secure_logs }}"
-  changed_when: false
+- name: Ipa-certs | fetch CA certificates from IPA (delegated shuttle, design D1)
+  block:
+    - name: Ipa-certs | create root-only fetch directory on idm
+      # tempfile (state: directory) mint is unique but takes no mode parameter;
+      # the follow-up file task enforces the root-only 0700 explicitly.
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: ca-fetch
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      register: ca_fetch_tmp
 
-- name: Ipa-certs | download ca from IPA to temp location
-  ansible.builtin.shell: |
-    set -o pipefail && ipa ca-show kubernetes-ca --certificate-out={{ kubernetes_certificates_path }}ca.crt.new
-  no_log: "{{ secure_logs }}"
-  changed_when: false
-  become: true
-  environment:
-    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
+    - name: Ipa-certs | enforce root-only mode on idm fetch directory
+      ansible.builtin.file:
+        path: "{{ ca_fetch_tmp.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
 
-- name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA"
-  ansible.builtin.shell: |
-    set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kubernetes_certificates_path }}ca.crt.kubeclusteradm
-  no_log: "{{ secure_logs }}"
-  changed_when: false
+    - name: Ipa-certs | download ca from IPA to idm temp location
+      ansible.builtin.shell: |
+        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out={{ ca_fetch_tmp.path }}/ca.crt.new
+      no_log: "{{ secure_logs }}"
+      changed_when: false
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      environment:
+        KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_download.ccache"
+
+    - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA to idm temp location"
+      ansible.builtin.shell: |
+        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ ca_fetch_tmp.path }}/ca.crt.kubeclusteradm
+      no_log: "{{ secure_logs }}"
+      changed_when: false
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      environment:
+        KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_download.ccache"
+
+    - name: "Ipa-certs | slurp kubernetes-ca (CA #1) from idm"
+      ansible.builtin.slurp:
+        src: "{{ ca_fetch_tmp.path }}/ca.crt.new"
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      register: ca_fetch_ca1
+
+    - name: "Ipa-certs | slurp kubeclusteradm CA (CA #2) from idm"
+      ansible.builtin.slurp:
+        src: "{{ ca_fetch_tmp.path }}/ca.crt.kubeclusteradm"
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      register: ca_fetch_ca2
+
+  always:
+    - name: Ipa-certs | remove idm fetch directory
+      ansible.builtin.file:
+        path: "{{ ca_fetch_tmp.path }}"
+        state: absent
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      when: ca_fetch_tmp is defined and ca_fetch_tmp.path is defined
+
+- name: "Ipa-certs | install kubernetes-ca (CA #1) from shuttle"
+  ansible.builtin.copy:
+    content: "{{ ca_fetch_ca1.content | b64decode }}"
+    dest: "{{ kubernetes_certificates_path }}ca.crt.new"
+    owner: root
+    group: root
+    mode: '0644'
   become: true
-  environment:
-    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_fetch.ccache"
+
+- name: "Ipa-certs | install kubeclusteradm CA (CA #2) from shuttle"
+  ansible.builtin.copy:
+    content: "{{ ca_fetch_ca2.content | b64decode }}"
+    dest: "{{ kubernetes_certificates_path }}ca.crt.kubeclusteradm"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
 
 - name: Ipa-certs | verify ca.crt.new fingerprint matches expected IPA CA
   ansible.builtin.shell: |
@@ -217,6 +278,20 @@
 
 - name: Ipa-certs | create IPA service principal for master hostname
   ansible.builtin.include_tasks: ipa-master.yml
+
+# One host ticket for the whole cert-enrollment phase (design D2): minted once
+# from the master's own /etc/krb5.keytab into a pre-cleared scratch cache
+# (changed_when: false), and inherited via env: KRB5CCNAME by all five cert
+# enrollments below (apiserver, front-proxy, kubelet client, controller-manager,
+# scheduler). They all request under the same host/<master> identity, so the
+# per-file mint/discard cycle was pure overhead; each file keeps only its
+# ipacert call and its own when:-gate.
+- name: Ipa-certs | mint shared host ticket for the cert-enrollment phase
+  ansible.builtin.include_tasks: _krb_ticket.yml
+  vars:
+    krb_ticket_principal: "host/{{ orchestration_host_hostname }}"
+    krb_ticket_keytab_path: /etc/krb5.keytab
+    krb_ticket_cache_purpose: cert_enroll
 
 - name: Ipa-certs | remove kubeadm apiserver cert so IPA-signed one is created
   ansible.builtin.file:

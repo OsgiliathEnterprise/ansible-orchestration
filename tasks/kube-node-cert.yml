@@ -35,22 +35,17 @@
     mode: '0755'
   become: true
 
-- name: Kube-node-cert | pre-clear node host ticket scratch cache
-  ansible.builtin.file:
-    path: "{{ kube_scratch_cache_dir }}/{{ orchestration_host_hostname }}.node_cert.ccache"
-    state: absent
-  become: true
-  changed_when: false
-  when: not node_client_cert_result.stat.exists
-
-- name: Kube-node-cert | acquire ticket from the node's own host keytab
-  community.general.krb_ticket:
-    keytab: true
-    keytab_path: /etc/krb5.keytab
-    principal: "host/{{ orchestration_host_hostname }}"
-    cache_name: "{{ kube_scratch_cache_dir }}/{{ orchestration_host_hostname }}.node_cert.ccache"
-  become: true
-  changed_when: false
+# Node-local ticket: each worker mints from its OWN /etc/krb5.keytab (the
+# shared include's delegate default = inventory host is exactly right here).
+# Explicit slug preserves the historically-observable per-node cache name so
+# re-runs on a VM converged before this change keep finding the same file.
+- name: Kube-node-cert | mint ticket from the node's own host keytab
+  ansible.builtin.include_tasks: _krb_ticket.yml
+  vars:
+    krb_ticket_principal: "host/{{ orchestration_host_hostname }}"
+    krb_ticket_keytab_path: /etc/krb5.keytab
+    krb_ticket_cache_purpose: node_cert
+    krb_ticket_cache_slug: "{{ orchestration_host_hostname }}"
   when: not node_client_cert_result.stat.exists
 
 - name: Kube-node-cert | create node client private key (on the node)

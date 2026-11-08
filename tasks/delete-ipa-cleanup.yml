@@ -17,23 +17,13 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
 
-- name: Delete-ipa-cleanup | pre-clear admin ticket scratch cache
-  ansible.builtin.file:
-    path: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
-    state: absent
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  changed_when: false
-
-- name: Delete-ipa-cleanup | acquire admin ticket into scratch cache
-  community.general.krb_ticket:
-    principal: admin
-    password: "{{ company_realm_password }}"
-    cache_name: "{{ kube_scratch_cache_dir }}/admin.ipa_cleanup.ccache"
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  no_log: "{{ secure_logs }}"
-  changed_when: false
+- name: Delete-ipa-cleanup | mint admin ticket for the cleanup calls
+  ansible.builtin.include_tasks: _krb_ticket.yml
+  vars:
+    krb_ticket_principal: admin
+    krb_ticket_password: "{{ company_realm_password }}"
+    krb_ticket_cache_purpose: ipa_cleanup
+    krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
 
 - name: Delete-ipa-cleanup | Check admin cert existence
   ansible.builtin.stat:

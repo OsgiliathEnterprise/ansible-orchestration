@@ -45,7 +45,7 @@
         enabled_services:
           - service: "https"
         enabled_ports:
-          - port: 6443
+          - port: "{{ orchestration_kube_port | default('6443') }}"
             protocol: tcp
   when: kube_masters_group in group_names
   tags:
@@ -68,7 +68,7 @@
           - source: "{{ kube_service_cidr }}"
 #          - source: "{{ orchestration_controlplane_node_network }}"
         enabled_ports:
-          - port: 6443
+          - port: "{{ orchestration_kube_port | default('6443') }}"
             protocol: tcp
           - port: 2379
             protocol: tcp

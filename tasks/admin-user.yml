@@ -86,16 +86,7 @@
   register: kube_admin_cert_stat
   become: true
 
-- name: Admin-user | pre-clear admin-cert ticket scratch cache (on idm)
-  ansible.builtin.file:
-    path: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
-    state: absent
-  delegate_to: "{{ groups[idm_group] | first }}"
-  become: true
-  changed_when: false
-  when: not kube_admin_cert_stat.stat.exists
-
-- name: Admin-user | mint enrollment ticket into scratch cache (on idm)
+- name: Admin-user | mint enrollment ticket (keytab-first, password fallback)
   # Keytab first: the steady-state identity requests its own certificate with the
   # kubeclusteradm keytab exported by ipa-cert-renewal.yml on a previous converge
   # (it lives at {{ kube_idm_keytab_path }}, root-only in the unit state directory).
@@ -103,28 +94,29 @@
   # runs later in the converge), so the mint fails and the rescue falls back to the
   # admin password ticket (same convention as ipa-kube-admin-credential.yml's
   # probes). The cache name records the primary identity (kubeclusteradm); the
-  # rescue re-uses the same file for the admin-identity fallback.
+  # fallback pins the same slug so both identities share one cache file — the
+  # ipacert consumer below reads exactly this path via KRB5CCNAME.
   block:
     - name: Admin-user | mint kubeclusteradm keytab ticket
-      community.general.krb_ticket:
-        keytab: true
-        keytab_path: "{{ kube_idm_keytab_path }}"
-        principal: "{{ ipa_kube_admin_principal }}"
-        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      changed_when: false
+      ansible.builtin.include_tasks: _krb_ticket.yml
+      vars:
+        krb_ticket_principal: "{{ ipa_kube_admin_principal }}"
+        krb_ticket_keytab_path: "{{ kube_idm_keytab_path }}"
+        krb_ticket_cache_purpose: cert_enroll
+        krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
       when: not kube_admin_cert_stat.stat.exists
   rescue:
     - name: Admin-user | fall back to admin password ticket
-      community.general.krb_ticket:
-        principal: admin
-        password: "{{ company_realm_password }}"
-        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.cert_enroll.ccache"
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      no_log: "{{ secure_logs }}"
-      changed_when: false
+      ansible.builtin.include_tasks: _krb_ticket.yml
+      vars:
+        krb_ticket_principal: admin
+        krb_ticket_password: "{{ company_realm_password }}"
+        krb_ticket_cache_purpose: cert_enroll
+        # Pin the cache name to the primary identity (design D4 slug override):
+        # the derived "admin" slug would write a different file than the
+        # ipacert consumer reads via KRB5CCNAME.
+        krb_ticket_cache_slug: "{{ ipa_kube_admin_principal }}"
+        krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
       when: not kube_admin_cert_stat.stat.exists
 
 - name: Admin-user | slurp admin client csr from master

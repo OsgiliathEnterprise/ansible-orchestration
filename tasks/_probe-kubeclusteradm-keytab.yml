@@ -1,0 +1,44 @@
+---
+# Shared keytab-usability probe for the kubeclusteradm principal (design D3).
+#
+# Callers set:
+#   probe_purpose   cache suffix -> <kube_scratch_cache_dir>/kubeclusteradm.<purpose>.ccache
+#   probe_fact_name name of the boolean fact set from the probe outcome
+#                   (kca_keytab_usable at the admin-credential site,
+#                    kca_rotation_keytab_usable at the renewal site)
+#
+# The ticket is minted ON idm from the exported keytab: that is where the
+# kubeclusteradm keytab lives, and keytab probes never need the admin
+# password. Each call site keeps its own when:-gate (swap_needed / renewal
+# window) and its own downstream decision — this include owns only the
+# pre-clear + mint + outcome-fact shape.
+- name: "Krb-probe | probe kubeclusteradm keytab {{ probe_purpose }}"
+  block:
+    - name: "Krb-probe | pre-clear kubeclusteradm.<purpose>.ccache {{ probe_purpose }}"
+      ansible.builtin.file:
+        path: "{{ kube_scratch_cache_dir }}/kubeclusteradm.{{ probe_purpose }}.ccache"
+        state: absent
+      become: true
+      changed_when: false
+
+    - name: "Krb-probe | acquire kubeclusteradm ticket from keytab into scratch cache"
+      community.general.krb_ticket:
+        state: present
+        cache_name: "{{ kube_scratch_cache_dir }}/kubeclusteradm.{{ probe_purpose }}.ccache"
+        keytab: true
+        keytab_path: "{{ kube_idm_keytab_path }}"
+        principal: "{{ ipa_kube_admin_principal }}"
+      environment:
+        KRB5CCNAME: "{{ kube_scratch_cache_dir }}/kubeclusteradm.{{ probe_purpose }}.ccache"
+      become: true
+      changed_when: false
+      delegate_to: "{{ groups[idm_group] | first }}"
+
+    - name: "Krb-probe | record keytab usable"
+      ansible.builtin.set_fact:
+        "{{ probe_fact_name }}": true
+
+  rescue:
+    - name: "Krb-probe | record keytab unusable (rotated or missing entries)"
+      ansible.builtin.set_fact:
+        "{{ probe_fact_name }}": false
