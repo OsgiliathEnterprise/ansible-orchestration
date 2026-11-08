@@ -113,7 +113,7 @@
     #     against the node's own trust anchor (design D2) ---
     - name: Kube-install-join | wait for API server readiness (validated)
       ansible.builtin.uri:
-        url: "https://{{ orchestration_master_ip }}:6443/healthz"
+        url: "https://{{ orchestration_master_ip }}:{{ orchestration_kube_port }}/healthz"
         ca_path: /etc/kubernetes/pki/ca.crt
         status_code: 200
       become: true
@@ -222,7 +222,7 @@
           clusters:
           - cluster:
               certificate-authority: /etc/kubernetes/pki/ca.crt
-              server: https://{{ orchestration_master_ip }}:6443
+              server: https://{{ orchestration_master_ip }}:{{ orchestration_kube_port }}
             name: default-cluster
           contexts:
           - context:
