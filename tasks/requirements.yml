@@ -1,7 +1,8 @@
 ---
 # Ticketing convention: this role never acquires Kerberos tickets with shell
-# kinit (nor klist/kdestroy). Ticket acquisition runs through the native
-# community.general.krb_ticket module into root-only scratch caches under
+# kinit (nor klist/kdestroy). Ticket acquisition runs exclusively through the
+# shared include tasks/_krb_ticket.yml (the single entry point, wrapping the
+# native Kerberos ticket module) into root-only scratch caches under
 # {{ kube_scratch_cache_dir }} (created below), named
 # <principal>.<purpose>.ccache and pre-cleared before every acquisition. The
 # directory is created here, before any play can reach a ticketing task — on
@@ -30,6 +31,27 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   run_once: true
   become: true
+
+# Sweep caches whose names were superseded by the ticket-dedup change, so a VM
+# converged before the change does not keep stale files next to the current
+# convention: the five per-file cert-enrollment caches are replaced by the one
+# shared host_master.cert_enroll.ccache (design D2), and the master-side
+# admin.ca_fetch.ccache is replaced by admin.ca_download.ccache minted idm-local
+# (design D1). Ephemeral scratch state, not configuration — changed_when: false
+# matches the pre-clear tasks.
+- name: Requirements | remove superseded scratch credential caches
+  ansible.builtin.file:
+    path: "{{ kube_scratch_cache_dir }}/{{ item }}"
+    state: absent
+  become: true
+  changed_when: false
+  loop:
+    - host_master.kubelet_client.ccache
+    - host_master.front_proxy.ccache
+    - host_master.apiserver.ccache
+    - host_master.scheduler.ccache
+    - host_master.controller_manager.ccache
+    - admin.ca_fetch.ccache
 
 - name: Requirements | import swap role
   ansible.builtin.import_role:

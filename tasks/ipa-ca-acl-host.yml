@@ -13,11 +13,11 @@
 #                      with (e.g. {{ kube_scratch_cache_dir }}/admin.ca_acl.ccache).
 #
 # Authentication: the delegated idm session consumes the caller-provisioned
-# scratch admin ticket via environment: KRB5CCNAME. The callers
-# (ipa-ca-acl-prejoin.yml for the pre-join grant, ipa-cert-renewal.yml for the
-# steady-state re-assert) mint it fresh (pre-cleared, from
-# company_realm_password) before the loops that include this file. The include
-# therefore must not be called without that ticket in place.
+# scratch admin ticket via environment: KRB5CCNAME. The ticket is minted by the
+# grant wrapper (tasks/_ipa-ca-acl-grants.yml), which both callers include —
+# ipa-ca-acl-prejoin.yml for the pre-join grant, ipa-cert-renewal.yml for the
+# steady-state re-assert. The include therefore must not be called without
+# that ticket in place (always go through the wrapper).
 
 - name: "Ipa-ca-acl-host | ensure host membership in acl {{ ipa_ca_acl_name }}"
   ansible.builtin.shell: |

@@ -1,0 +1,84 @@
+---
+# Shared Kerberos ticket-acquisition include (design D4): the single entry
+# point for minting a scratch-cache ticket. Replaces the per-file
+# pre-clear + community.general.krb_ticket pairs so the convention
+# (pre-cleared cache, changed_when: false, no ambient cache) is enforced in
+# one place instead of being copied — the repetition is exactly where the
+# stale-/tmp comment and the missed idm delegation survived the last refactor.
+#
+# Include with vars:
+#   krb_ticket_principal:     MIT principal to authenticate (required), e.g.
+#                             admin, {{ ipa_kube_admin_principal }},
+#                             host/{{ orchestration_host_hostname }}.
+#   krb_ticket_cache_purpose: purpose label (required); the cache is named
+#                             <slug>.<purpose>.ccache under
+#                             kube_scratch_cache_dir.
+#   krb_ticket_cache_slug:    optional slug override; defaults to the
+#                             principal's first path component with '/'
+#                             replaced by '_' and the domain stripped (host/
+#                             master.example.test -> host_master). Pass an
+#                             explicit slug when the call site must keep a
+#                             historically-observable cache name.
+#   krb_ticket_keytab_path:   keytab mode (mutually exclusive with password).
+#   krb_ticket_password:      password mode (mutually exclusive with
+#                             keytab_path). no_log is derived automatically
+#                             (secure_logs) so a password flow cannot forget
+#                             it; the static gate requires password-mode
+#                             call sites to delegate to the FreeIPA server.
+#   krb_ticket_delegate_to:   host the ticket is minted on; defaults to the
+#                             inventory host. Privileged principals (admin,
+#                             kubeclusteradm) must mint on idm.
+#
+# The scratch cache is ephemeral state, not configuration: both tasks report
+# no change (changed_when: false on the pre-clear; krb_ticket renews a
+# per-purpose cache).
+
+- name: "Krb-ticket | validate include parameters"
+  ansible.builtin.assert:
+    that:
+      - krb_ticket_principal is defined
+      - krb_ticket_cache_purpose is defined
+      - (krb_ticket_keytab_path is defined) != (krb_ticket_password is defined)
+    fail_msg: >-
+      _krb_ticket.yml requires krb_ticket_principal, krb_ticket_cache_purpose
+      and exactly one of krb_ticket_keytab_path / krb_ticket_password
+      (got keytab={{ krb_ticket_keytab_path | default(false) }},
+      password={{ krb_ticket_password | default(false) | ternary('set', 'unset') }})
+    quiet: true
+
+- name: "Krb-ticket | resolve scratch cache path"
+  ansible.builtin.set_fact:
+    krb_ticket_cache_path: >-
+      {{ kube_scratch_cache_dir }}/{{ krb_ticket_cache_slug
+      | default(krb_ticket_principal | replace('/', '_') | regex_replace('\..*$', ''))
+      }}.{{ krb_ticket_cache_purpose }}.ccache
+
+- name: "Krb-ticket | pre-clear {{ krb_ticket_cache_path }}"
+  ansible.builtin.file:
+    path: "{{ krb_ticket_cache_path }}"
+    state: absent
+  delegate_to: "{{ krb_ticket_delegate_to | default(inventory_hostname) }}"
+  become: true
+  changed_when: false
+
+- name: "Krb-ticket | acquire {{ krb_ticket_principal }} ticket (keytab) into scratch cache"
+  community.general.krb_ticket:
+    keytab: true
+    keytab_path: "{{ krb_ticket_keytab_path }}"
+    principal: "{{ krb_ticket_principal }}"
+    cache_name: "{{ krb_ticket_cache_path }}"
+  delegate_to: "{{ krb_ticket_delegate_to | default(inventory_hostname) }}"
+  become: true
+  changed_when: false
+  when: krb_ticket_keytab_path is defined
+
+- name: "Krb-ticket | acquire {{ krb_ticket_principal }} ticket (password) into scratch cache"
+  community.general.krb_ticket:
+    principal: "{{ krb_ticket_principal }}"
+    password: "{{ krb_ticket_password }}"
+    cache_name: "{{ krb_ticket_cache_path }}"
+  delegate_to: "{{ krb_ticket_delegate_to | default(inventory_hostname) }}"
+  become: true
+  no_log: "{{ secure_logs }}"
+  changed_when: false
+  when: krb_ticket_password is defined
