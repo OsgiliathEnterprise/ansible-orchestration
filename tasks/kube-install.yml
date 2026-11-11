@@ -114,6 +114,7 @@
     kubernetes_ignore_preflight_errors: "Firewalld,SystemVerification"
     kubernetes_role: "{{ kube_node_role.msg }}"
     kubernetes_join_command: ""
+    kubernetes_kube_port: "{{ orchestration_kube_port }}"
     kubernetes_config_cluster_configuration:
       networking:
         podSubnet: "{{ kube_cidr }}"

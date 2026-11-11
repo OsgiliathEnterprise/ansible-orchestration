@@ -84,19 +84,10 @@ provisioner:
   name: ansible
   env:
     ANSIBLE_COLLECTIONS_PATH: "${MOLECULE_PROJECT_DIRECTORY}/../community-collections:${HOME}/.ansible/collections:/usr/share/ansible/collections"
-  options:
-    vvv: True
+    ANSIBLE_VERBOSITY: 2
   config_options:
     defaults:
       remote_tmp: /tmp
-#  config_options:
-#    defaults:
-#      forks: 20
-#      gather_timeout: 20
-#      timeout: 60
-#    ssh_connection:
-#      pipelining: true
-#      ssh_args: -o ControlMaster=auto -o ControlPersist=6000s
     ssh_connection:
       pipelining: true
 verifier:
