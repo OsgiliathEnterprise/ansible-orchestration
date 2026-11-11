@@ -25,7 +25,7 @@
 # tasks through environment: KRB5CCNAME — never an ambient cache.
 
 - name: Ipa-ca-acl-grants | mint admin ticket for the CA ACL grants
-  ansible.builtin.include_tasks: _krb_ticket.yml
+  ansible.builtin.include_tasks: ../_krb_ticket.yml
   vars:
     krb_ticket_principal: admin
     krb_ticket_password: "{{ company_realm_password }}"

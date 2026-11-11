@@ -16,7 +16,7 @@
     state: enabled
     immediate: true
     permanent: true
-  delegate_to: "{{ groups[kube_masters_group][0] }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   when:
     - kube_nodes_group in group_names

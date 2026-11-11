@@ -17,7 +17,7 @@ ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
 # Second FreeIPA CA that signs all K8s *client* certificates (front-proxy, kubelet,
 # node, admin). CA #1 (kubernetes-ca) signs the API server *serving* cert and the
 # kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
-# kubeclusteradm CA. See tasks/ipa-kubeclusteradm-ca.yml.
+# kubeclusteradm CA. See tasks/certs/ipa-kubeclusteradm-ca.yml.
 ipa_kubeclusteradm_ca_name: "kubeclusteradm"
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
@@ -39,20 +39,20 @@ orchestration_readiness_retries: 40
 orchestration_readiness_delay: 5
 kubernetes_rollout_wait_timeout: 300
 # updateStrategy override applied to the calico-node DaemonSet by the post-swap
-# CA-recovery patch (tasks/calico-ca-recovery.yml): the 100% default restarts all
+# CA-recovery patch (tasks/certs/calico-ca-recovery.yml): the 100% default restarts all
 # calico-node pods concurrently (measured ~30s vs ~75s serial on a 3-node
 # topology); the parallels-sequential scenario overrides with "1" to exercise the
 # operator's one-at-a-time default (maxUnavailable: 1) on the same code path.
 calico_recovery_max_unavailable: "100%"
 # Budget for the all-nodes Ready gate that precedes the cluster-wide calico-node restart
-# (tasks/calico-ca-recovery.yml, design D4): in the order-tolerant play the master reaches
+# (tasks/certs/calico-ca-recovery.yml, design D4): in the order-tolerant play the master reaches
 # the gate while workers may still be converging (node join + kubelet start), so the budget
 # must cover the workers' remaining convergence, not just CNI initialisation. Gating first
 # bounds the post-patch rollout wait to CNI init (~30-45s parallel). 30 x 10s = 300s worst
 # case; the kvm scenario raises the retries to match its 600s rollout budget.
 calico_recovery_nodes_ready_retries: 30
 calico_recovery_nodes_ready_delay: 10
-# Per-phase budget for the decoupled calico-node rollout wait (tasks/calico-ca-recovery.yml):
+# Per-phase budget for the decoupled calico-node rollout wait (tasks/certs/calico-ca-recovery.yml):
 # phase 1 polls pod readiness after the trigger patch; on timeout it escalates by restarting the
 # Calico control plane (see calico_recovery_restart_typha) and deleting the stuck pods
 # (recreation is not gated by updateStrategy, so the tigera operator's revert of our
@@ -60,7 +60,7 @@ calico_recovery_nodes_ready_delay: 10
 # measured ~45-90s parallel/serial restart plus one kubelet StartError back-off cycle.
 calico_recovery_rollout_retries: 18
 calico_recovery_rollout_delay: 10
-# Escalation toggle (tasks/calico-ca-recovery.yml): when phase 1 times out with calico-node pods
+# Escalation toggle (tasks/certs/calico-ca-recovery.yml): when phase 1 times out with calico-node pods
 # still stuck, the escalation also deletes the calico-typha and calico-kube-controllers pods (by
 # label discovery, no-op when absent) BEFORE deleting the stuck pods, so their controllers
 # recreate them with a fresh watch cache. Recovers from the stale-typha confd-starvation flake
@@ -79,7 +79,7 @@ orchestration_kube_port: 6443
 # pre-cleared before acquisition so a stale ticket can never be reused.
 kube_scratch_cache_dir: /run/krb5cc
 # Shared host ticket for the cert-enrollment phase (design D2): minted once by
-# tasks/ipa-certs.yml through tasks/_krb_ticket.yml (principal host/<master>
+# tasks/certs/ipa-certs.yml through tasks/_krb_ticket.yml (principal host/<master>
 # -> slug host_master, purpose cert_enroll). The ipacert consumers in the five
 # master cert files inherit it via env: KRB5CCNAME instead of minting their
 # own per-file ticket.

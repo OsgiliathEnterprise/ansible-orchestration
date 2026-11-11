@@ -7,7 +7,7 @@
 # with this cache via env: KRB5CCNAME. Pre-cleared so a stale/expired ticket
 # is never reused; changed_when: false — the scratch cache is ephemeral state.
 - name: Ipa-kubernetes-ca | mint admin ticket for the CA chain
-  ansible.builtin.include_tasks: _krb_ticket.yml
+  ansible.builtin.include_tasks: ../_krb_ticket.yml
   vars:
     krb_ticket_principal: admin
     krb_ticket_password: "{{ company_realm_password }}"
