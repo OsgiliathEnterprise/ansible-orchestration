@@ -22,14 +22,14 @@ ipa_kubeclusteradm_ca_name: "kubeclusteradm"
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
 orchestration_kube_dns_ip: "10.96.0.10"
-# kube_cidr: "10.244.0.0/16" # Calico default: no guarantee that it will work if modified, should be equals to custom resource specified https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/custom-resources.yaml
+# Calico IP pool must match kube_cidr above. Source of truth for the Calico custom resource is templates/calico_configuration.yml.j2 (pinned by calico_cni_version), not the upstream custom-resources.yaml.
 docker_gpg_key: https://download.docker.com/linux/fedora/gpg
 standalone_role: Yes
 secure_logs: Yes
 reset_kube: False
 k8s_version: "1.36" # See compatibility matrix with calico
 kubernetes_package_version: "{{ k8s_version }}.2-150500.2.1"
-calico_cni_version: "v3.32.1"
+calico_cni_version: "v3.33.0"
 calico_os: "linux"
 helm_version: "v3.22.0"
 kubernetes_api_ready_retries: 12
