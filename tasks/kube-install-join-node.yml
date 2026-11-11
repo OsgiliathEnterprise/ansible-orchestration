@@ -211,7 +211,7 @@
 
     # --- Per-node client certificate (task 2.1): this node's own identity ---
     - name: Kube-install-join | request this node's own client cert from FreeIPA
-      ansible.builtin.include_tasks: kube-node-cert.yml
+      ansible.builtin.include_tasks: certs/kube-node-cert.yml
 
     # --- Construct per-node kubelet.conf (task 4.1): own cert/key + IPA CA + API URL ---
     - name: Kube-install-join | create per-node kubelet.conf

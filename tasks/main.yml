@@ -36,7 +36,7 @@
     - kube_masters_group in group_names
 
 - name: Setup IPA PKI certificates on master
-  ansible.builtin.include_tasks: ipa-certs.yml
+  ansible.builtin.include_tasks: certs/ipa-certs.yml
   when:
     - kube_masters_group in group_names
 
@@ -63,7 +63,7 @@
 # kubeadm CA was dropped from it). The kubectl get nodes verification therefore runs
 # at the end of admin-user.yml, after admin.conf is re-embedded with the CA #2 cert.
 - name: Create kube admin credential from IPA CA (master)
-  ansible.builtin.include_tasks: ipa-kube-admin-credential.yml
+  ansible.builtin.include_tasks: certs/ipa-kube-admin-credential.yml
   when:
     - kube_masters_group in group_names
 
@@ -73,7 +73,7 @@
     - kube_masters_group in group_names
 
 - name: Patch kube configs to use IPA CA
-  ansible.builtin.include_tasks: ipa-pki-swap.yml
+  ansible.builtin.include_tasks: certs/ipa-pki-swap.yml
   when:
     - kube_masters_group in group_names
 
@@ -83,7 +83,7 @@
     - kube_masters_group in group_names or kube_nodes_group in group_names
 
 - name: Install unattended certificate renewal timers
-  ansible.builtin.include_tasks: ipa-cert-renewal.yml
+  ansible.builtin.include_tasks: certs/ipa-cert-renewal.yml
   when:
     - kube_masters_group in group_names or kube_nodes_group in group_names
 

@@ -33,7 +33,10 @@ The `kvm` scenario is the single-worker CI topology: it has no `node2`, and its 
 
 ## Task Flow (L3)
 
-`tasks/main.yml` include graph (every file below exists under `tasks/`):
+`tasks/main.yml` include graph. Cert-domain files live under `tasks/certs/` (shown with the
+`certs/` prefix); all targets are relative to `tasks/`. The shared ticketing helper
+`_krb_ticket.yml` stays at `tasks/` root and is spelled `../_krb_ticket.yml` in `certs/`
+callers:
 
 ```
 main.yml
@@ -55,32 +58,32 @@ main.yml
 |-- firewall.yml                  [role: tcharl.ansible_routing x3]
 |-- kube-install.yml              [master: kubeadm init | node: packages only]
 |   |-- role: tcharl.kubernetes   (join disabled: kubernetes_join_command: "")
-|-- ipa-certs.yml                 [kube_masters_group]
-|   |-- ipa-kubernetes-ca.yml     (CA #1: serving cert / trust anchor; -> _krb_ticket.yml admin ca_provision)
-|   |-- ipa-kubeclusteradm-ca.yml (CA #2: client certs)
-|   |-- ipa-ca-acl-prejoin.yml    (pre-join CA ACL grants; -> _ipa-ca-acl-grants.yml)
+|-- certs/ipa-certs.yml           [kube_masters_group]
+|   |-- certs/ipa-kubernetes-ca.yml     (CA #1: serving cert / trust anchor; -> ../_krb_ticket.yml admin ca_provision)
+|   |-- certs/ipa-kubeclusteradm-ca.yml (CA #2: client certs)
+|   |-- certs/ipa-ca-acl-prejoin.yml    (pre-join CA ACL grants; -> _ipa-ca-acl-grants.yml)
 |   |-- _krb_ticket.yml           (D1: admin ca_download ticket minted idm-local for the CA-fetch shuttle)
-|   |-- ipa-master.yml
+|   |-- certs/ipa-master.yml
 |   |-- _krb_ticket.yml           (D2: shared host ticket purpose cert_enroll — consumed by the five cert files below)
-|   |-- ipa-api-server.yml
-|   |-- ipa-front-proxy.yml
-|   |-- kube-apiserver-kubelet-client.yml
-|   |-- ipa-controller-manager-client.yml
-|   |-- ipa-scheduler-client.yml
+|   |-- certs/ipa-api-server.yml
+|   |-- certs/ipa-front-proxy.yml
+|   |-- certs/kube-apiserver-kubelet-client.yml
+|   |-- certs/ipa-controller-manager-client.yml
+|   |-- certs/ipa-scheduler-client.yml
 |-- kube-install-join-node.yml    [kube_nodes_group]
 |   |-- _krb_ticket.yml           (admin node_join ticket for the profile gate + CA fetch, minted idm-local)
-|   |-- kube-node-cert.yml        (node-local: -> _krb_ticket.yml own host-keytab ticket + key/CSR + ipacert on CA #2)
-|-- ipa-kube-admin-credential.yml [kube_masters_group; keytab-first + password fallback]
-|   |-- _probe-kubeclusteradm-keytab.yml (shared keytab usability probe, registers kca_keytab_usable)
+|   |-- certs/kube-node-cert.yml  (node-local: -> ../_krb_ticket.yml own host-keytab ticket + key/CSR + ipacert on CA #2)
+|-- certs/ipa-kube-admin-credential.yml [kube_masters_group; keytab-first + password fallback]
+|   |-- certs/_probe-kubeclusteradm-keytab.yml (shared keytab usability probe, registers kca_keytab_usable)
 |   |-- _krb_ticket.yml           (Vault-password probe + keytab/password verify pair, delegated to idm)
 |-- admin-user.yml                [kube_masters_group; CA #2 cert + admin.conf re-embed + kubectl get nodes verification]
 |   |-- _krb_ticket.yml           (keytab-first block + admin-password rescue pinned to the shared cert_enroll cache)
-|-- ipa-pki-swap.yml              [kube_masters_group]
-|   |-- calico-ca-recovery.yml    (no-op when Calico is not installed)
+|-- certs/ipa-pki-swap.yml        [kube_masters_group]
+|   |-- certs/calico-ca-recovery.yml  (no-op when Calico is not installed)
 |-- kube-firewall.yml             [kube_masters_group or kube_nodes_group]
-|-- ipa-cert-renewal.yml          [kube_masters_group or kube_nodes_group]
-|   |-- _ipa-ca-acl-grants.yml    (steady-state CA ACL re-assert; -> _krb_ticket.yml + ipa-ca-acl-host.yml)
-|   |-- _probe-kubeclusteradm-keytab.yml (shared keytab usability probe, registers kca_keytab_usable)
+|-- certs/ipa-cert-renewal.yml    [kube_masters_group or kube_nodes_group]
+|   |-- certs/_ipa-ca-acl-grants.yml  (steady-state CA ACL re-assert; -> ../_krb_ticket.yml + ipa-ca-acl-host.yml)
+|   |-- certs/_probe-kubeclusteradm-keytab.yml (shared keytab usability probe, registers kca_keytab_usable)
 |-- nfs-mountpoints.yml           [kube_masters_group + nfs_mountpoints]
     |-- _server-inner.yml
         |-- persistent-volume.yml (k8s PV; delegate_to master)
@@ -115,12 +118,12 @@ This role never uses shell `kinit` or the ambient per-user ticket cache (`~/.k5.
   `slurp` + `copy: content:`. The realm admin password never authenticates to the IPA API
   from a kube host; admin-identity module calls are delegated to idm.
 - **Keytab usability probes** — keytab-first flows probe through the shared include
-  `tasks/_probe-kubeclusteradm-keytab.yml` (block/rescue `krb_ticket` into a scratch cache,
+  `tasks/certs/_probe-kubeclusteradm-keytab.yml` (block/rescue `krb_ticket` into a scratch cache,
   registering `kca_keytab_usable`); a rotated keytab fails the probe and the caller falls
   back to the password flow. Both call sites (`ipa-kube-admin-credential.yml`,
   `ipa-cert-renewal.yml`) include it — do not copy the probe.
 - **Shared CA ACL grant wrapper** — the pre-ticket + two CA ACL host-grant loops live once
-  in `tasks/_ipa-ca-acl-grants.yml` (which itself uses `_krb_ticket.yml` and the
+  in `tasks/certs/_ipa-ca-acl-grants.yml` (which itself uses `_krb_ticket.yml` and the
   check-then-add `ipa-ca-acl-host.yml`); `ipa-ca-acl-prejoin.yml` (pre-join) and
   `ipa-cert-renewal.yml` (steady-state re-assert, master-gated via `ipa_ca_acl_grant_when`)
   include the wrapper.
@@ -145,13 +148,18 @@ This role never uses shell `kinit` or the ambient per-user ticket cache (`~/.k5.
   and `Environment=KRB5CCNAME=FILE:/var/lib/kube-cert-renew/ccache`; the script pre-clears
   that cache so a stale ticket is never reused.
 - Ticket tasks report no change (the scratch cache is ephemeral state, not configuration).
-- **Committed gate** — `tests/static_gate.py` (YAML-parsed, run under
-  `.tox/converge-monorepo/bin/python`) enforces the ticketing + hygiene rules: no shell
-  `kinit`/`klist`/`kdestroy`, no cache paths under `/tmp`, every password-bearing
-  `krb_ticket`/`ipaadmin_password` task delegated to idm, every `krb_ticket` paired with a
-  same-file pre-clear, every `ipacert`/`ipa-getcert`/`ipactl` shell task carrying
-  `env: KRB5CCNAME`, no orphaned task files, no unused registered variables. It must
-  report zero findings before a converge is considered passing.
+- **Verification proof** — there is no committed static gate script for this role (the
+  previously documented `tests/static_gate.py` never existed in its git history). The
+  standing proof of the ticketing + hygiene rules below is the full molecule cycle on the
+  host-OS-matched scenario (macOS→`parallels`, Linux→`kvm`, Windows→`default`):
+  `destroy → converge-monorepo → verify-monorepo`, plus a reconverge for idempotence.
+  `verify` green — all nodes Ready, per-pod evidence, PV mounts — is the passing gate.
+  The hygiene rules (no shell `kinit`/`klist`/`kdestroy`, no cache paths under `/tmp`,
+  every password-bearing `krb_ticket`/`ipaadmin_password` task delegated to idm, every
+  `krb_ticket` paired with a same-file pre-clear, every `ipacert`/`ipa-getcert`/`ipactl`
+  shell task carrying `env: KRB5CCNAME`, no orphaned task files, no unused registered
+  variables) remain binding *review* criteria — enforced by diff review together with the
+  green molecule cycle, not by a script.
 
 ## Execution
 

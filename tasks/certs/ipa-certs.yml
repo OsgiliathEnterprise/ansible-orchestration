@@ -54,7 +54,7 @@
 # fingerprint verification below stays master-local: it reads the installed
 # file and needs no ticket.
 - name: Ipa-certs | acquire admin ticket into scratch cache (idm-local)
-  ansible.builtin.include_tasks: _krb_ticket.yml
+  ansible.builtin.include_tasks: ../_krb_ticket.yml
   vars:
     krb_ticket_principal: admin
     krb_ticket_cache_purpose: ca_download
@@ -287,7 +287,7 @@
 # per-file mint/discard cycle was pure overhead; each file keeps only its
 # ipacert call and its own when:-gate.
 - name: Ipa-certs | mint shared host ticket for the cert-enrollment phase
-  ansible.builtin.include_tasks: _krb_ticket.yml
+  ansible.builtin.include_tasks: ../_krb_ticket.yml
   vars:
     krb_ticket_principal: "host/{{ orchestration_host_hostname }}"
     krb_ticket_keytab_path: /etc/krb5.keytab

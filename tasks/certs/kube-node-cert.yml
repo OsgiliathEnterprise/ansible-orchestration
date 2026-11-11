@@ -40,7 +40,7 @@
 # Explicit slug preserves the historically-observable per-node cache name so
 # re-runs on a VM converged before this change keep finding the same file.
 - name: Kube-node-cert | mint ticket from the node's own host keytab
-  ansible.builtin.include_tasks: _krb_ticket.yml
+  ansible.builtin.include_tasks: ../_krb_ticket.yml
   vars:
     krb_ticket_principal: "host/{{ orchestration_host_hostname }}"
     krb_ticket_keytab_path: /etc/krb5.keytab
