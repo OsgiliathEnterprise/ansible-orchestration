@@ -340,6 +340,38 @@ def test_sa_key_exists_in_pki(host):
     assert host.file("/etc/kubernetes/pki/sa.key").exists
 
 
+def test_kubeadm_self_signed_ca_retired_from_master(host):
+    """Design D5: after the swap no kubeadm self-signed CA artifact may remain on the
+    master — no retained cert, no private key, no transient gate anchor."""
+    assert not host.file("/etc/kubernetes/pki/ca.crt.kubeadm").exists
+    assert not host.file("/etc/kubernetes/pki/ca.key").exists
+    assert not host.file("/tmp/kube-api-gate-anchor.crt").exists
+
+
+def test_kcm_cluster_signing_flags_emptied(host):
+    """KCM must not carry any cluster-signing certificate/key path (kubeadm CSR signers
+    disabled): both flags present with empty values, no kubeadm ca.crt/ca.key reference."""
+    with host.sudo():
+        cmd = host.run(
+            "grep -E -- '--cluster-signing-(cert|key)-file=.+' "
+            "/etc/kubernetes/manifests/kube-controller-manager.yaml || true"
+        )
+    assert cmd.stdout.strip() == "", (
+        "KCM cluster-signing flags must be emptied, found: " + cmd.stdout
+    )
+    with host.sudo():
+        cert_flag = host.run(
+            "grep -c -- '--cluster-signing-cert-file=' "
+            "/etc/kubernetes/manifests/kube-controller-manager.yaml"
+        )
+        key_flag = host.run(
+            "grep -c -- '--cluster-signing-key-file=' "
+            "/etc/kubernetes/manifests/kube-controller-manager.yaml"
+        )
+    assert int(cert_flag.stdout) >= 1, "--cluster-signing-cert-file= flag missing"
+    assert int(key_flag.stdout) >= 1, "--cluster-signing-key-file= flag missing"
+
+
 def test_apiserver_crt_signed_by_kubernetes_ca(host):
     with host.sudo():
         cmd = host.run(
