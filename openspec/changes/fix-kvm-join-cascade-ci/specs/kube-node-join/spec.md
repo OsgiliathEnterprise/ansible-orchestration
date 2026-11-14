@@ -40,3 +40,21 @@ When any phase of the node join block fails, the role SHALL fail with a diagnosi
 #### Scenario: CI captures post-mortem artifacts on failure
 - **WHEN** the kvm molecule converge fails on a node
 - **THEN** the CI log contains, for the failing host: `journalctl -u kubelet` since block start, `crictl pods` and `crictl ps` output, the gate probe outputs, `ipa-getcert list`, and the presence/absence of the host and `kubeclusteradm` keytabs
+
+### Requirement: Master bring-up API calls feeding join readiness tolerate transient failures
+The master bring-up task that patches cluster state the node join gates depend on (the post-calico coredns restart) SHALL tolerate transient API-server failures within a bounded retry budget, instead of aborting the master chain on the first timeout. Budget exhaustion SHALL fail with a diagnosis naming the phase and the upstream cause.
+
+#### Scenario: Transient 504 during calico bring-up
+- **WHEN** the freshly initialized API server answers the coredns restart call or its rollout poll with a 504 because of calico bring-up load on a constrained runner
+- **THEN** the operation is retried within the bounded budget and master provisioning continues once it succeeds
+- **THEN** the master reaches `kubernetesNodes` profile creation within the node join gate's budget
+
+#### Scenario: Rollout wait accepts only the restarted rollout and fits the join gate budget
+- **WHEN** the coredns restart is applied and the rollout wait evaluates readiness
+- **THEN** the wait is a resilient poll gated on `observedGeneration >= generation` and `readyReplicas >= replicas`, so it is not satisfied by the pre-patch ReplicaSet
+- **THEN** the combined apply and wait budget stays within the node join profile-gate ceiling, so a master still waiting on coredns cannot itself starve the gate it feeds
+
+#### Scenario: Persistent API unavailability fails with a named diagnosis
+- **WHEN** the coredns patch apply or the rollout wait exhausts its budget without success
+- **THEN** the failure names the phase (annotation apply vs rollout wait), the last API observation, and the upstream cause (calico bring-up / API-server health)
+- **THEN** the failure is not an anonymous until-loop exhaustion and the run does not proceed with broken cluster DNS

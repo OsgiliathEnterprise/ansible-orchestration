@@ -143,6 +143,12 @@
   # symlinked later in ipa-pki-swap), so a bare kubectl call would fail and the old failed_when:false
   # swallowed that — likely a silent no-op on fresh installs. The restartedAt annotation value is
   # tied to the CNI version, so re-converge at an unchanged calico_cni_version is a no-op.
+  # Load-tolerance (Travis kvm build #107): the freshly initialized API server answers this call
+  # with 504 Gateway Timeout under calico bring-up load, which killed the master chain minutes
+  # before kubernetesNodes profile creation and starved the node join gate. The patch is idempotent
+  # (same restartedAt value), so the until-loop retries are safe; failed_when: false keeps
+  # exhaustion inside our control so the named fail below reports the API-side evidence instead of
+  # an anonymous until-exhaustion failure.
   kubernetes.core.k8s:
     api_version: apps/v1
     kind: Deployment
@@ -151,16 +157,69 @@
     kubeconfig: "{{ kube_config_path }}"
     context: kubernetes-admin@kubernetes
     state: present
-    wait: true
-    wait_timeout: "{{ kubernetes_rollout_wait_timeout }}"
+    wait: false
     resource_definition:
       spec:
         template:
           metadata:
             annotations:
               restartedAt: "calico-{{ calico_cni_version }}"
+  register: kube_coredns_restart_apply
+  until: kube_coredns_restart_apply is succeeded
+  retries: 6
+  delay: 10
+  failed_when: false
   when: kube_masters_group in group_names
   become: yes
+
+- name: Kube-install | Fail if coredns restart annotation never applied
+  ansible.builtin.fail:
+    msg: >-
+      Kube-install | coredns restart annotation could not be applied after 6 attempts
+      (last error: {{ kube_coredns_restart_apply.msg | default('unknown') }}). The API server
+      is unhealthy during calico bring-up; without the restartedAt patch cluster DNS stays broken
+      and every downstream cert/DNS task will cascade. Upstream: kubeadm init / calico install.
+  when: kube_masters_group in group_names and kube_coredns_restart_apply is failed
+
+- name: Kube-install | Wait for coredns restart rollout
+  # Replaces the module's wait:true (a 504 on any poll used to fail the task outright). The
+  # observedGeneration check ensures we wait for the RESTARTED rollout, not the pre-patch one.
+  # Transient 5xx during polling re-renders `until` false and simply retries; only true budget
+  # exhaustion reaches the named fail. Budget (24x20s + per-call time) stays well inside the
+  # node join profile-gate ceiling so master never starves the gate behind this wait.
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: kube-system
+    name: coredns
+    kubeconfig: "{{ kube_config_path }}"
+    context: kubernetes-admin@kubernetes
+  register: kube_coredns_rollout
+  until: >-
+    (kube_coredns_rollout.resources | default([]) | length > 0) and
+    (kube_coredns_rollout.resources[0].status | default({})).observedGeneration | default(0) >=
+    (kube_coredns_rollout.resources[0].metadata | default({})).generation | default(0) and
+    (kube_coredns_rollout.resources[0].status | default({})).readyReplicas | default(0) >=
+    (kube_coredns_rollout.resources[0].spec | default({})).replicas | default(1)
+  retries: 24
+  delay: 20
+  failed_when: false
+  when: kube_masters_group in group_names
+  become: yes
+
+- name: Kube-install | Fail if coredns restart rollout never completed
+  ansible.builtin.fail:
+    msg: >-
+      Kube-install | coredns deployment never reported a complete restarted rollout within the
+      wait budget (last observation: {{ kube_coredns_rollout.resources | default('API unreachable') }}).
+      Upstream: calico bring-up on master; inspect 'kubectl -n kube-system get deploy coredns' and
+      calico pod logs.
+  when: kube_masters_group in group_names and
+        not ((kube_coredns_rollout.resources | default([]) | length > 0) and
+             (kube_coredns_rollout.resources[0].status | default({})).observedGeneration | default(0) >=
+             (kube_coredns_rollout.resources[0].metadata | default({})).generation | default(0) and
+             (kube_coredns_rollout.resources[0].status | default({})).readyReplicas | default(0) >=
+             (kube_coredns_rollout.resources[0].spec | default({})).replicas | default(1))
 
 - name: Kube-install | download calicoctl
   ansible.builtin.get_url:

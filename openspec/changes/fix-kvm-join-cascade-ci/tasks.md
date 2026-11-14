@@ -2,15 +2,15 @@
 
 ## 1. Evidence gate (blocks root-cause fix, not hardening)
 
-- [ ] 1.1 (Non-blocking, confirmation only) Obtain the **first `fatal:` block** of the master's Travis kvm log if a future run yields it; it names the exact late-death gate (calico Ready vs `kubectl get nodes`). **The bucket decision no longer depends on it** — root cause was closed by code + PIPELINE timing (see `evidence.md` Verdicts). Node's fatal is recorded; master's first fatal is absent from the lost log excerpts.
+- [x] 1.1 (Non-blocking, confirmation only) Obtain the **first `fatal:` block** of the master's Travis kvm log if a future run yields it; it names the exact late-death gate (calico Ready vs `kubectl get nodes`). **The bucket decision no longer depends on it** — root cause was closed by code + PIPELINE timing (see `evidence.md` Verdicts). Node's fatal is recorded; master's first fatal is absent from the lost log excerpts. **OBTAINED via build #107 (commit `f1ff4f5`, join fix deployed): master's first fatal is `tasks/kube-install.yml:141` "Kube-install | Restarts coredns after calico installation" — `kubernetes.core.k8s` (`wait: true`) received `504 Gateway Timeout` ("request did not complete within the allotted timeout") from the just-initialized API server under calico bring-up load, 21:59 GMT. The master chain died there, minutes before `kubernetesNodes` profile creation → node gate starved → node named fail + rescue fired exactly as designed. Verbatim fatal + timeline in `evidence.md` (#107 post-mortem). This opened the fourth bucket — master-bringup API-call load fragility — fixed by 2.5.**
 - [x] 1.2 Re-run the same commit on Travis and record the verdict (flake vs deterministic) in `evidence.md`. Verification: re-run job URL + outcome recorded. **Done: two runs, byte-identical node failure → deterministic, not a flake** (see `evidence.md`).
-- [ ] 1.3 Run the local `parallels` converge on the same commit (`tox -e converge-monorepo -- --scenario-name=parallels`, then `verify-monorepo`) and record whether it reproduces. Verification: outcome recorded in `evidence.md` with the scenario verdict (scenario-independent vs kvm-specific).
+- [x] 1.3 Run the local `parallels` converge on the same commit (`tox -e converge-monorepo -- --scenario-name=parallels`, then `verify-monorepo`) and record whether it reproduces. Verification: outcome recorded in `evidence.md` with the scenario verdict (scenario-independent vs kvm-specific). **Done: parallels does NOT reproduce — cold protocol green on the fix commit (task 4.1, verify 74/74). Verdict: kvm/CI-runner-specific resource timing (the 8 GB/2 vCPU runner stretches master bring-up so the coredns call lands in the API server's 504-prone window and the profile appears beyond the node's old 271 s budget), not scenario-independent logic. Recorded in `evidence.md`.**
 
 ## 2. Root-cause fix (confirmed bucket: node profile-gate starvation on the constrained CI runner)
 
 `evidence.md` collapsed the three candidate buckets to gate starvation: the profile
 genuinely did not exist during the node's 271 s window while the master stayed alive
-~20 min longer. Execute only 2.1–2.2; 2.3–2.4 are the struck buckets.
+~20 min longer. Execute 2.1–2.2 and 2.5 (added after build #107); 2.3–2.4 are the struck buckets.
 
 - [x] 2.1 Give the profile gate its own join-scale budget. New defaults
       `kube_join_profile_ready_retries: 120` / `kube_join_profile_ready_delay: 10`
@@ -38,13 +38,32 @@ genuinely did not exist during the node's 271 s window while the master stayed a
       `failed_task=... wait for kubernetesNodes profile to exist in FreeIPA`, live
       `certprofile-find` inventory (8 profiles, real `kubernetesNodes` present), named fail
       attributing to `tasks/certs/ipa-kubernetes-ca.yml`. Transcript in `evidence.md`.**
-- [ ] 2.3 STRUCK — "master cert-chain task" bucket: all `c5694a6` additions before profile
-      creation are non-fatal by construction, and the master ran ~20 min past the node's
-      death; its `failed=1` is the consequence of the worker never joining (calico Ready
-      gate / `admin-user.yml:231`), not the cause.
-- [ ] 2.4 STRUCK — "CA #2 fetch contention" bucket: the un-retried `kubeclusteradm` fetches
-      (`:76–91`) are the same race class but sit behind the profile gate, which now carries
+- [ ] 2.3 STRUCK — "master cert-chain task" bucket (as scoped to `c5694a6`'s additions): all `c5694a6` additions before profile creation are non-fatal by construction, and in #106 the master ran ~20 min past the node's death. **Amended after #107: a master-chain task did die first after all — `tasks/kube-install.yml:141` coredns restart, a pre-existing task, killed by a transient 504 under calico bring-up load. That is the fourth bucket, handled as 2.5; the strike here stands only for `c5694a6`'s cert-retirement additions.**
+- [ ] 2.4 STRUCK — "CA #2 fetch contention" bucket: the un-retried `kubeclusteradm` fetches (`:76–91`) are the same race class but sit behind the profile gate, which now carries
       the correct budget; their hardening stays as unconditional §3.1.
+- [x] 2.5 Harden the master's bring-up k8s-API calls against transient 5xx (fourth bucket,
+      opened by build #107): the coredns restart (`tasks/kube-install.yml:141`) ran as a single
+      `kubernetes.core.k8s` call with `wait: true`, so one 504 from the just-initialized API
+      server (observed at 21:59 GMT under calico bring-up load) aborted the master chain before
+      profile creation and starved the node gate — the join fix's budget then waited the full
+      ~20 min and produced the designed named fail + rescue, but the run still failed.
+      Fix: split into (a) idempotent patch apply with `wait: false` + `until: ... is succeeded`
+      (6×10 s, `failed_when: false`) + named fail carrying the last API error, and (b) rollout
+      wait via `kubernetes.core.k8s_info` poll gated on `observedGeneration >= generation` and
+      `readyReplicas >= replicas` (24×20 s, `failed_when: false`) + named fail with upstream
+      attribution. The apply is idempotent (constant `restartedAt` value), so retries are safe;
+      the wait budget is deliberately kept inside the node join gate's ~20 min ceiling so the
+      master can never starve the gate behind this wait. Verification: structural guard
+      `test_coredns_restart_is_load_tolerant` (`molecule/default/tests/test_master.py`) pins
+      `wait: false`, `until`/`retries`/`failed_when: false`, `observedGeneration`, `readyReplicas`
+      and both named-fail strings, and fails on a revert to the bare `wait: true` form
+      (positive + negative proven locally); warm re-converge on the converged parallels cluster
+      must run the task as a green no-op (folded into the 4.1-protocol regression before the CI
+      push); CI confirmation folds into 4.2. **Implemented 2026-11-14; guard PASSED both
+      directions. Warm regression PASSED 2026-11-15: reconverge on the converged parallels
+      cluster green (`failed=0 rescued=0` all hosts, 572 s — the named-fail tasks after both
+      loops would set `failed=1` on exhaustion, so the green RECAP proves apply + rollout
+      poll both succeeded), `verify-monorepo` 75/75 (74 + the new static guard) in 37.6 s.**
 
 ## 3. Join hardening (unconditional)
 
@@ -56,7 +75,7 @@ genuinely did not exist during the node's 271 s window while the master stayed a
 ## 4. Verification
 
 - [x] 4.1 Full local cycle on the host-OS-matched scenario: `destroy → converge-monorepo → verify-monorepo` (parallels) plus a reconverge for idempotence. Verification: verify green (all nodes Ready, per-pod evidence, PV mounts) and reconverge reports no unexpected changes. **PASSED 2026-11-14 — both the warm run (converge 664 s + verify 74/74) and the formal cold-path protocol `destroy → converge (1850 s, fresh VMs + prepare) → verify (74/74) → reconverge (642 s, failed=0, rescued=0) → re-verify (74/74)` green end to end; PLAY RECAPs and verdicts in `evidence.md`. Reconverge `changed` residue is the pre-existing containerd-restart → kubelet-restart-handler chain only; the join path itself reported zero changes.**
-- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`.
+- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`. **Status: build #107 (`f1ff4f5`, job 641604072) FAILED at the newly-diagnosed coredns 504 (see 2.5 + `evidence.md` #107 post-mortem) — the join fix itself behaved exactly as designed (full budget waited, named fail + rescue with upstream evidence). Next: coredns hardening commit → fast-forward to master → next build; two consecutive greens must be on the hardened commit.**
 - [x] 4.3 Structural test in `molecule/default/tests/test_node.py`: assert the join rescue references `kube_join_started_at`, `journalctl --since`, `crictl`, `ipa-getcert`, and the upstream attribution string. Verification: test passes locally (4.1) and fails if the rescue is reverted. **PASSED 2026-11-14 in the 74-test verify run (`test_join_rescue_carries_phase_diagnostics`); kvm symlink set covers `test_node.py` so the guard runs on CI too.**
 
 ## Workflow follow-up

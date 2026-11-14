@@ -318,3 +318,85 @@ re-verify` green end to end on the host-OS-matched scenario.
   Prior failed build #106 duration 3953 s ≈ 66 min is the expected pace.
 - Exit criterion: two consecutive green kvm runs on the fixed commit — second run is a
   same-commit Travis restart once the first is green (task 1.2 precedent).
+
+## Build #107 post-mortem (commit `f1ff4f5`, job 641604072 — FAILED, 5608 s)
+
+**Verdict: the join fix worked exactly as designed; the run died one gate earlier in the
+master chain — the coredns restart got a 504 from the just-initialized API server.** This
+is the fourth bucket (master-bringup API-call load fragility), fixed by tasks.md 2.5.
+
+### Master's first fatal (task 1.1 — obtained)
+
+`Kube-install | Restarts coredns after calico installation` (`tasks/kube-install.yml:141`),
+`kubernetes.core.k8s` with `wait: true`, at 21:59:08 GMT:
+
+```
+fatal: [master.osgiliath.test]: FAILED! => {"changed": false, "msg": "504\nReason: Gateway Timeout
+... 'Date': 'Sat, 14 Nov 2026 21:59:08 GMT' ...
+"message":"Timeout: request did not complete within the allotted timeout","reason":"Timeout..."}
+Origin: .../tasks/kube-install.yml:141:3
+```
+
+The freshly initialized API server, under calico bring-up load on the 8 GB/2 vCPU runner,
+answered the single un-retried API call with a gateway timeout; the task had no retries, so
+the master play aborted there — **minutes before** `kubernetesNodes` profile creation in
+`tasks/certs/ipa-kubernetes-ca.yml`.
+
+### Timeline (GMT)
+
+| Time | Event |
+|------|-------|
+| 20:55:34 | job started (VM bring-up, prepare) |
+| ~21:41 | converge play starts |
+| 21:59:08 | **master fatal — coredns 504** (`kube-install.yml:141`) |
+| 22:01:12 | node join block starts (`join started 2026-11-14T22:01:12+00:00`) |
+| 22:01→22:2x | node profile gate consumes **full 120-attempt budget** (grep count = 120) |
+| ~22:2x | node rescue fires → named fail with upstream evidence |
+| 22:29:02 | job finished, `test-exec: exit 1 (4952.74 s converge)` |
+
+### Node-side proof the join fix works under CI conditions
+
+PLAY RECAP: `master failed=1` (coredns 504), `node1 failed=1 rescued=1` — the rescue
+engaged, then the named fail reported (log line 8532):
+
+```
+Node join failed in task 'Kube-install-join | wait for kubernetesNodes profile to exist in
+FreeIPA' (join started 2026-11-14T22:01:12+00:00). Upstream dependencies for profile/CA/API
+gate failures: master-side certificate provisioning — tasks/certs/ipa-certs.yml, with the
+'kubernetesNodes' profile created in tasks/certs/ipa-kubernetes-ca.yml — and idm CA
+availability: a profile-gate timeout means the master had not reached profile creation yet,
+not a node fault. certprofile-find (rc=0): 4 profiles matched ...
+```
+
+The captured `certprofile-find` shows exactly the 4 built-in profiles — `kubernetesNodes`
+absent — **proving the starvation attribution**: the master never reached profile creation
+because it died at coredns. Contrast with #106's blind 2000-line journal tail.
+
+### Cascade re-interpretation of #106/#107
+
+The #106-era root cause (node profile-gate starvation, fixed by 2.1–2.2) remains valid and
+was *confirmed* by #107 — the gate now waits join-scale instead of self-failing at 271 s.
+But both runs shared an earlier, load-dependent master death: the join-scale budget alone
+cannot make CI green while a single transient 504 on an un-retried master bring-up API call
+aborts the chain before profile creation. 2.5 removes that failure mode (apply is an
+idempotent annotated patch; the rollout wait is a resilient `k8s_info` poll), so the next
+build exercises the full designed flow.
+
+### Fix (tasks.md 2.5)
+
+`tasks/kube-install.yml` coredns restart split into idempotent apply (`wait: false`,
+`until: ... is succeeded`, 6×10 s, `failed_when: false`) + named fail carrying the last API
+error, and rollout wait via `k8s_info` poll gated on `observedGeneration >= generation` and
+`readyReplicas >= replicas` (24×20 s, `failed_when: false`) + named fail with upstream
+attribution. Wait budget stays inside the node gate's ~20 min ceiling so the master can
+never starve the gate behind this wait. Structural guard
+`test_coredns_restart_is_load_tolerant` (`molecule/default/tests/test_master.py`) pins the
+contract (positive + revert-detection PASSED locally). Log: `travis_107.log` (ANSI-stripped,
+8613 lines).
+
+**Local validation before CI push (2026-11-15):** warm reconverge on the converged parallels
+cluster — `converge-monorepo` OK in 572 s, PLAY RECAP `failed=0 rescued=0` on all three hosts
+(the named-fail tasks following both retry loops would set `failed=1` on budget exhaustion,
+so the green RECAP proves the idempotent apply and the `observedGeneration`-gated rollout poll
+both succeeded on a live cluster); `verify-monorepo` 75/75 passed in 37.6 s — the prior 74
+plus the new static guard running under molecule.

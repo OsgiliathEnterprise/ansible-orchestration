@@ -605,3 +605,33 @@ def test_volume_is_create(host):
                 break
             time.sleep(5)
         assert int(cmd.stdout) > 0
+
+
+def test_coredns_restart_is_load_tolerant():
+    """The coredns restart must survive transient API-server 5xx during calico bring-up
+    (Travis kvm build #107: a 504 from the just-initialized API server killed the master
+    chain, which starved the node join profile gate). Contract pinned here: the patch apply
+    is idempotent with wait:false + until/retries/failed_when:false, the rollout wait polls
+    via k8s_info gated on observedGeneration (so it waits for the RESTARTED rollout), and
+    both loops end in a named fail that attributes upstream cause. Static file check; fails
+    if the hardening is reverted to the bare wait:true form."""
+    role_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    task_file = os.path.join(role_root, "tasks", "kube-install.yml")
+    with open(task_file, encoding="utf-8") as fh:
+        body = fh.read()
+    start = body.index("Restarts coredns after calico installation")
+    end = body.index("download calicoctl")
+    block = body[start:end]
+    assert "wait: false" in block, "k8s apply must not use module wait:true (504-prone)"
+    assert "wait: true" not in block, "module wait:true reintroduced"
+    assert "k8s_info" in block, "rollout wait must poll via k8s_info"
+    for needle in (
+        "until:",
+        "retries:",
+        "failed_when: false",
+        "observedGeneration",
+        "readyReplicas",
+        "coredns restart annotation could not be applied",
+        "never reported a complete restarted rollout",
+    ):
+        assert needle in block, f"coredns restart block must reference {needle!r}"
