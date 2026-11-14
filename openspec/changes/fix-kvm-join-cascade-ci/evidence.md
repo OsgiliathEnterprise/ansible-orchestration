@@ -301,3 +301,20 @@ worker cert suites, structural guard). Log: `sh_1dbd17ac8001niPvpaKBXeehF1.out`.
 
 **Task 4.1 verdict: PASSED.** Full protocol run `destroy → converge → verify → reconverge →
 re-verify` green end to end on the host-OS-matched scenario.
+
+## Task 4.2 — CI delivery (in progress)
+
+- Fix committed on `parallel`: `0038b9c` ("fix(kube-node-join): dedicated profile-gate
+  budget for join-scale, named fails with phase diagnostics") — full rationale in the
+  commit message (measured node budget ~271 s vs master's minutes-later profile creation
+  on the 8 GB/2 vCPU runner).
+- Delivery to `master` (Travis only builds `master` per `.travis.yml` `branches.only`):
+  `upstream/master` merged into `parallel` (`f1ff4f5`, tree byte-identical to `0038b9c`,
+  no content delta) and pushed `parallel:master` — fast-forward `abd9765..f1ff4f5`, the
+  same content shape as the established PR `parallel → master` flow (PR #23 precedent).
+- Travis build **#107** created for `f1ff4f5` on `master`, job `641604072`
+  (https://app.travis-ci.com/github/OsgiliathEnterprise/ansible-orchestration/jobs/641604072).
+  Runs `tox -e test-exec -- --scenario-name kvm` (single-worker CI topology).
+  Prior failed build #106 duration 3953 s ≈ 66 min is the expected pace.
+- Exit criterion: two consecutive green kvm runs on the fixed commit — second run is a
+  same-commit Travis restart once the first is green (task 1.2 precedent).
