@@ -18,6 +18,32 @@ def _worker_hosts():
 testinfra_hosts = _worker_hosts()
 
 
+# --- Join-rescue structural guard (openspec fix-kvm-join-cascade-ci) ---
+
+def test_join_rescue_carries_phase_diagnostics():
+    """The join block's rescue must keep the phase-aware diagnostics (design D2): join-start
+    anchor, journalctl --since window, crictl + ipa-getcert captures, the idm certprofile
+    inventory, and the upstream attribution to master-side provisioning — so a profile-gate
+    starvation can never again be reported as a bare 'kubelet not active'. Static file check
+    (no host needed); fails if the rescue is reverted."""
+    role_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    task_file = os.path.join(role_root, "tasks", "kube-install-join-node.yml")
+    with open(task_file, encoding="utf-8") as fh:
+        body = fh.read()
+    assert "rescue:" in body, "join block must keep its rescue"
+    rescue = body.split("rescue:", 1)[1]
+    for needle in (
+        "kube_join_started_at",
+        "journalctl",
+        "--since",
+        "crictl",
+        "ipa-getcert",
+        "certprofile-find",
+        "ipa-kubernetes-ca.yml",
+    ):
+        assert needle in rescue, f"join rescue must reference {needle!r}"
+
+
 def test_kubelet_active(host):
     with host.sudo():
         command = """service kubelet status | \

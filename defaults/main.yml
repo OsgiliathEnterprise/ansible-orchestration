@@ -34,9 +34,19 @@ calico_os: "linux"
 helm_version: "v3.22.0"
 kubernetes_api_ready_retries: 12
 kubernetes_api_ready_delay: 10
-# Budget for node-join readiness gates (IPA kubernetesNodes profile + API reachability)
+# Budget for node-join readiness gates (API reachability, CA content). The profile gate
+# below deliberately does NOT use this pair: see kube_join_profile_ready_*.
 orchestration_readiness_retries: 40
 orchestration_readiness_delay: 5
+# Join-scale budget for the kubernetesNodes profile gate ONLY
+# (tasks/kube-install-join-node.yml): the profile is created on the master behind
+# kubeadm init, and on a constrained CI runner (Travis kvm, 8 GB / 2 vCPU) the master
+# reaches profile creation well past the generic 40 x 5 s window (measured: the node
+# gate died at ~271 s while the master was still minutes away from creating the
+# profile). 120 x 10 s = ~20 min ceiling — a ceiling, not a floor: the gate passes as
+# soon as the profile appears, so healthy runs are unaffected.
+kube_join_profile_ready_retries: 120
+kube_join_profile_ready_delay: 10
 kubernetes_rollout_wait_timeout: 300
 # updateStrategy override applied to the calico-node DaemonSet by the post-swap
 # CA-recovery patch (tasks/certs/calico-ca-recovery.yml): the 100% default restarts all

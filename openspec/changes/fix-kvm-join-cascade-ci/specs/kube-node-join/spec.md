@@ -1,0 +1,42 @@
+## ADDED Requirements
+
+### Requirement: Profile readiness gate has a dedicated join-scale budget
+The node's `kubernetesNodes` profile readiness gate SHALL wait on a dedicated budget (its own retry/delay variables) instead of the generic readiness pair, so scenarios can size it to the master's profile-creation pace on constrained runners without inflating the other gates. On budget exhaustion the failure SHALL name the missing signal and the master-side producer task, and SHALL capture the actual profile list from FreeIPA as evidence.
+
+#### Scenario: Slow master does not spuriously fail the gate
+- **WHEN** the master's provisioning runs slower than the local pace (e.g. the CI runner's constrained CPU/RAM) and the profile is created after the generic 40×5 s budget would have elapsed but within the join-scale ceiling
+- **THEN** the node passes the gate and proceeds to join
+
+#### Scenario: Profile gate timeout fails with a named diagnosis
+- **WHEN** the profile gate exhausts its join-scale budget
+- **THEN** the failure output names the missing signal (`kubernetesNodes` profile) and the master-side producer (`tasks/certs/ipa-kubernetes-ca.yml`)
+- **THEN** the output includes the `ipa certprofile-find` result captured from the IPA server, so "absent" vs "pattern mismatch" is decidable from the log alone
+
+### Requirement: Node CA material fetches tolerate transient FreeIPA failures
+The worker node's fetches of its trust material from FreeIPA (the CA #1 `kubernetes-ca` and CA #2 `kubeclusteradm` certificates) SHALL retry transient failures within a bounded budget, consistent with the retry discipline of the node's other IPA-dependent gates. A persistent failure SHALL fail with a message naming the CA, never masked by retries into a late join timeout.
+
+#### Scenario: Transient IPA API failure during CA fetch
+- **WHEN** an `ipa ca-show` retrieval fails on its first attempt because the IPA API is briefly unavailable
+- **THEN** the fetch is retried within the bounded budget and the join proceeds once it succeeds
+- **THEN** the retry attempts are visible in the task output (retries/delay configured on the task)
+
+#### Scenario: Missing CA fails with a named diagnosis
+- **WHEN** a CA retrieval exhausts its retry budget or returns an empty/invalid certificate
+- **THEN** the task fails with a message naming the CA (`kubernetes-ca` or `kubeclusteradm`) and the IPA server it was fetched from
+- **THEN** the join block does not continue into later gates with missing or partial trust material
+
+### Requirement: Join failure produces a structured per-phase diagnosis
+When any phase of the node join block fails, the role SHALL fail with a diagnosis naming the failed phase and the upstream dependency it was waiting on. The generic message *"Node join failed - kubelet not active. Check kubelet logs above."* SHALL NOT be the only output of a failed join, and journal evidence SHALL be bounded to the join block's own execution window rather than a blind tail.
+
+#### Scenario: API gate timeout names the upstream dependency
+- **WHEN** the node's API readiness gate (HTTPS healthz against the IPA-signed serving certificate) exhausts its budget
+- **THEN** the failure output names the phase (`api-readiness`), the dependency (the master's API server serving the FreeIPA-signed certificate via `tasks/certs/ipa-certs.yml`), and the last probe result
+- **THEN** the output includes the kubelet journal captured since the join block started
+
+#### Scenario: Master cert-phase non-completion names the unmet dependency
+- **WHEN** the master has not completed its cert phase by the time the node's gate budgets expire (failure inside the phase, or simply slower provisioning than the budget)
+- **THEN** the node's failure output explicitly lists "master completed cert phase" among the checked upstream conditions and names it as unmet, instead of only reporting `kubelet not active`
+
+#### Scenario: CI captures post-mortem artifacts on failure
+- **WHEN** the kvm molecule converge fails on a node
+- **THEN** the CI log contains, for the failing host: `journalctl -u kubelet` since block start, `crictl pods` and `crictl ps` output, the gate probe outputs, `ipa-getcert list`, and the presence/absence of the host and `kubeclusteradm` keytabs

@@ -19,6 +19,14 @@
 - name: Kube-install-join | join node (skip if already joined)
   when: not kube_node_joined.stat.exists
   block:
+    # Phase-attribution anchor for the rescue (design D2): kubelet/crictl captures are
+    # windowed with --since so they contain only join-era lines.
+    # Shell/command exception (AGENTS.md): node-local wall clock, no native equivalent.
+    - name: Kube-install-join | record join start timestamp
+      ansible.builtin.command: date -Is
+      register: kube_join_started_at
+      changed_when: false
+
     # Scratch admin ticket for the two idm-delegated `ipa` consumers below
     # (profile gate + CA fetch): they get the cache via env: KRB5CCNAME
     # instead of an in-shell `kinit admin` into the shared ambient cache.
@@ -36,6 +44,11 @@
 
     # --- Gate: the CA + per-node profile must exist in FreeIPA before the CA fetch (design D1) ---
     # The CA is created before the profile, so passing this gate guarantees the fetch succeeds.
+    # Budget: join-scale (kube_join_profile_ready_*), NOT the generic readiness pair — the
+    # producer (tasks/certs/ipa-kubernetes-ca.yml) runs on the master behind kubeadm init,
+    # which on a loaded CI runner outlives the 40 x 5 s window (Travis kvm determinism: see
+    # openspec/changes/fix-kvm-join-cascade-ci/evidence.md). On timeout this fails into the
+    # block rescue, which names the missing signal and its producer (task 2.2).
     - name: Kube-install-join | wait for kubernetesNodes profile to exist in FreeIPA
       ansible.builtin.shell: |
         set -o pipefail && ipa certprofile-find | grep -c ': kubernetesNodes'
@@ -43,8 +56,8 @@
       become: true
       changed_when: false
       no_log: "{{ secure_logs }}"
-      retries: "{{ orchestration_readiness_retries }}"
-      delay: "{{ orchestration_readiness_delay }}"
+      retries: "{{ kube_join_profile_ready_retries }}"
+      delay: "{{ kube_join_profile_ready_delay }}"
       register: node_profile_check
       until: node_profile_check.stdout == '1'
       environment:
@@ -52,15 +65,37 @@
 
 
     # --- Trust anchor from FreeIPA (task 3.1): fetch CA from the IDM host, not master ---
+    # Bounded retry with content validation: the file must exist, be non-empty, and hold a
+    # PEM header before we proceed (the master-side request/export races the fetch).
+    # no_log is off: stdout carries only public CA material / ipa CLI errors.
     - name: Kube-install-join | fetch CA cert from FreeIPA (delegated to idm)
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt
+        ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt || true
+        grep -q 'BEGIN CERTIFICATE' /tmp/kube-node-ca.crt
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
-      no_log: "{{ secure_logs }}"
+      register: ca_fetch
+      until: ca_fetch.rc == 0
+      retries: 5
+      delay: 5
+      # failed_when: false keeps the exhaustion outcome non-fatal so the NAMED
+      # CA_FETCH_TIMEOUT fail task below (not a generic until-retry failure) owns the
+      # diagnosis. Until still governs the retry loop.
+      failed_when: false
       environment:
         KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
+
+    - name: Kube-install-join | fail if kubernetes-ca never validated as PEM
+      ansible.builtin.fail:
+        msg: >-
+          CA_FETCH_TIMEOUT: CA 'kubernetes-ca' never materialised as valid PEM at
+          /tmp/kube-node-ca.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
+          Last ipa output: {{ ca_fetch.stdout | default('') | truncate(400) }}
+          {{ ca_fetch.stderr | default('') | truncate(400) }}
+          Upstream dependencies: master certificate provisioning (tasks/certs/ipa-certs.yml)
+          and idm CA availability.
+      when: ca_fetch.rc != 0
 
     - name: Kube-install-join | slurp CA cert from idm
       ansible.builtin.slurp:
@@ -75,13 +110,31 @@
     # are proxied to the kubelet and rejected with 401 Unauthorized.
     - name: Kube-install-join | fetch kubeclusteradm CA cert from FreeIPA (delegated to idm)
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out=/tmp/kube-node-ca-clusteradm.crt
+        ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out=/tmp/kube-node-ca-clusteradm.crt || true
+        grep -q 'BEGIN CERTIFICATE' /tmp/kube-node-ca-clusteradm.crt
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
-      no_log: "{{ secure_logs }}"
+      register: ca_clusteradm_fetch
+      until: ca_clusteradm_fetch.rc == 0
+      retries: 5
+      delay: 5
+      # failed_when: false — see the kubernetes-ca fetch above: the named
+      # CA_FETCH_TIMEOUT fail task owns the diagnosis.
+      failed_when: false
       environment:
         KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
+
+    - name: Kube-install-join | fail if kubeclusteradm CA never validated as PEM
+      ansible.builtin.fail:
+        msg: >-
+          CA_FETCH_TIMEOUT: CA '{{ ipa_kubeclusteradm_ca_name }}' never materialised as valid PEM at
+          /tmp/kube-node-ca-clusteradm.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
+          Last ipa output: {{ ca_clusteradm_fetch.stdout | default('') | truncate(400) }}
+          {{ ca_clusteradm_fetch.stderr | default('') | truncate(400) }}
+          Upstream dependencies: master certificate provisioning (tasks/certs/ipa-certs.yml)
+          and idm CA availability.
+      when: ca_clusteradm_fetch.rc != 0
 
     - name: Kube-install-join | slurp kubeclusteradm CA cert from idm
       ansible.builtin.slurp:
@@ -319,17 +372,86 @@
       until: node_check.resources | length > 0
 
   rescue:
-    - name: Kube-install-join | capture kubelet logs for debugging
+    # Phase-aware diagnostics (design D2): every capture below is failed_when: false so the
+    # original error is never masked. Shell exceptions (AGENTS.md): journalctl, crictl and
+    # ipa-getcert have no native Ansible equivalents; all captures are read-only.
+    - name: Kube-install-join | capture kubelet logs since join start
       ansible.builtin.shell: |
-        journalctl -u kubelet --no-pager -n 2000
+        journalctl -u kubelet --no-pager --since "{{ kube_join_started_at.stdout | default('') }}" -n 300
       become: true
       changed_when: false
+      failed_when: false
       register: kubelet_logs
 
-    - name: Kube-install-join | show kubelet logs
-      ansible.builtin.debug:
-        var: kubelet_logs.stdout_lines
+    - name: Kube-install-join | capture container runtime state
+      ansible.builtin.shell: |
+        # `crictl pods` has no -a flag (unlike `crictl ps -a`): it already lists pods in
+        # every state (verified in the Phase-A negative test, where -a only printed usage).
+        crictl pods
+        crictl ps -a
+      become: true
+      changed_when: false
+      failed_when: false
+      register: crictl_state
 
-    - name: Kube-install-join | fail if join failed
+    - name: Kube-install-join | capture ipa-getcert request list
+      ansible.builtin.command: ipa-getcert list
+      become: true
+      changed_when: false
+      failed_when: false
+      register: getcert_list
+
+    - name: Kube-install-join | capture join cert/key material presence
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/kubernetes/kubelet.conf
+        - /etc/kubernetes/pki/ca.crt
+        - /etc/kubernetes/pki/ca-bundle.crt
+        - /etc/kubernetes/pki/node-client.crt
+        - /etc/krb5.keytab
+      become: true
+      register: join_artifact_state
+      failed_when: false
+
+    # Upstream evidence (task 2.2): the node is only a waiter — when the failed task is one
+    # of the upstream gates (profile / CA / API), capture the idm profile inventory so the
+    # diagnosis names the missing signal instead of blaming a kubelet that never started.
+    - name: Kube-install-join | capture certprofile inventory from idm
+      ansible.builtin.command: ipa certprofile-find
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      changed_when: false
+      failed_when: false
+      when: >-
+        ('profile' in (ansible_failed_task.name | default('') | lower)) or
+        ('ca' in (ansible_failed_task.name | default('') | lower)) or
+        ('api server' in (ansible_failed_task.name | default('') | lower))
+      register: profile_inventory_diag
+      environment:
+        KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
+
+    - name: Kube-install-join | print join diagnostics
+      ansible.builtin.debug:
+        msg:
+          - "failed_task={{ ansible_failed_task.name | default('unknown') }}"
+          - "join_started={{ kube_join_started_at.stdout | default('unknown') }}"
+          - "original_failure={{ ansible_failed_result.msg | default(ansible_failed_result | default('unknown') | string | truncate(500)) }}"
+          - "certprofile_find={{ profile_inventory_diag.stdout_lines | default(['<not captured: non-upstream gate or capture failed>']) }}"
+          - "crictl={{ crictl_state.stdout_lines | default(['<capture failed>']) }}"
+          - "ipa_getcert={{ getcert_list.stdout_lines | default(['<capture failed>']) }}"
+          - "artifacts(exist)={{ join_artifact_state.results | default([]) | map(attribute='stat.exists') | list }} (order: kubelet.conf, ca.crt, ca-bundle.crt, node-client.crt, krb5.keytab)"
+          - "kubelet_log(tail)={{ kubelet_logs.stdout_lines | default(['<capture failed>']) }}"
+
+    - name: Kube-install-join | fail with named join diagnosis
       ansible.builtin.fail:
-        msg: "Node join failed - kubelet not active. Check kubelet logs above."
+        msg: >-
+          Node join failed in task '{{ ansible_failed_task.name | default('unknown') }}'
+          (join started {{ kube_join_started_at.stdout | default('unknown') }}).
+          Upstream dependencies for profile/CA/API gate failures: master-side certificate
+          provisioning — tasks/certs/ipa-certs.yml, with the 'kubernetesNodes' profile
+          created in tasks/certs/ipa-kubernetes-ca.yml — and idm CA availability: a
+          profile-gate timeout means the master had not reached profile creation yet, not
+          a node fault. certprofile-find (rc={{ profile_inventory_diag.rc | default('n/a') }}):
+          {{ profile_inventory_diag.stdout | default('<not captured: non-upstream gate or capture failed>') | truncate(600) }}.
+          Original failure: {{ ansible_failed_result.msg | default('unknown') }}

@@ -1,0 +1,27 @@
+## Why
+
+The kvm (Travis CI) converge fails at `Kube-install-join | fail if join failed` (`tasks/kube-install-join-node.yml` rescue) with the generic message *"Node join failed - kubelet not active. Check kubelet logs above."* The Travis log names the dying task — the `kubernetesNodes` profile gate (`kube-install-join-node.yml:39`), 40 identical attempts with the profile genuinely absent — and the PIPELINE timing (31.5 min converge vs the node's 271 s gate window, master alive ~20 min past the node's death) closes the root cause as a **race**: the node's gate budget is too small for the master's profile-creation pace on the constrained CI runner. The master then dies at its first worker-dependent gate — the cascade, not the cause. Two defects made this undiagnosable from CI logs: the rescue reported only a 2000-line journal tail of a kubelet that never started (which misled this investigation), and every join-phase gate reports a generic timeout that names neither the phase nor the upstream dependency it waits on. `c5694a6` ("chore: remove the selfsigned kubernetes ca") **surfaced, not introduced**, the race: it added time to the master's pre-profile path, and the prior archived change was validated parallels-only.
+
+## What Changes
+
+- Root-cause fix: give the `kubernetesNodes` profile gate its own join-scale budget (dedicated vars, ~20 min ceiling sized ≥ 2× the measured CI pace) instead of the generic 40×5 s readiness pair, and make its timeout fail with a named diagnosis (`kubernetesNodes` missing + master-side producer task + captured `ipa certprofile-find` output) — see `evidence.md` for the measurement this budget is justified by.
+- Make the node's two delegated CA fetches (`ipa ca-show kubernetes-ca` and `ipa ca-show kubeclusteradm`, plus their slurps) **transient-resilient** (bounded retries) like the other IPA-dependent gates — they are hard fatals today.
+- Replace the join-block rescue's generic message with a **structured per-phase diagnostic**: the failing phase name, the upstream dependency it was waiting on (idm CA availability / master API serving the IPA certificate), and the gate's last probe state; the journal capture must be **since block start** (`--since` timestamp), not a blind tail.
+- Emit the join-phase post-mortem artifacts to the CI log from the Ansible `rescue:` itself (scenario-agnostic, no Travis config): `journalctl -u kubelet --since <block start>`, `crictl pods`/`crictl ps`, gate probe outputs, `ipa-getcert list` and keytab presence on the failing host.
+
+## Capabilities
+
+### New Capabilities
+
+- (none)
+
+### Modified Capabilities
+
+- `kube-node-join`: adds requirements that (a) the profile readiness gate waits on a dedicated join-scale budget and fails with a named diagnosis plus captured `ipa certprofile-find` evidence, (b) the node's CA material fetches from FreeIPA retry transient IPA/API failures within a bounded budget before failing, and (c) a failed join phase fails with a diagnosis naming the phase, the upstream dependency, and journal evidence captured since the join block started — never a generic "check kubelet logs".
+
+## Impact
+
+- Affected code: `tasks/kube-install-join-node.yml` (profile-gate budget + named-fail, fetch retries, rescue diagnostics); `defaults/main.yml` (new join-gate budget vars). No `tasks/certs/*` change (the struck master-chain bucket), no Travis config — diagnostics run in the rescue path (design D2).
+- Test/CI: `molecule/default/tests/test_node.py` gains structural assertions on the rescue diagnostic output; no interface or variable renames.
+- Root-cause tasks are collapsed to the evidence-matched bucket (node profile-gate starvation); the two non-matching buckets are struck with notes in `tasks.md` §2.
+- Cross-role risk: if a future run's evidence names `tcharl.freeipa_server` or `tcharl.kubernetes` as the failing task's owner, a separate openspec change is raised on that role (monorepo rule 4) instead of editing it here.
