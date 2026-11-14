@@ -69,6 +69,27 @@
       become: true
       register: kube_ca_crt
 
+    # The kubelet's x509 client authentication validates the API server's
+    # apiserver-kubelet-client certificate, which the IPA PKI swap re-issues under
+    # CA #2 (kubeclusteradm). Without this second anchor, kubectl exec/logs/port-forward
+    # are proxied to the kubelet and rejected with 401 Unauthorized.
+    - name: Kube-install-join | fetch kubeclusteradm CA cert from FreeIPA (delegated to idm)
+      ansible.builtin.shell: |
+        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out=/tmp/kube-node-ca-clusteradm.crt
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      changed_when: false
+      no_log: "{{ secure_logs }}"
+      environment:
+        KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.node_join.ccache"
+
+    - name: Kube-install-join | slurp kubeclusteradm CA cert from idm
+      ansible.builtin.slurp:
+        src: /tmp/kube-node-ca-clusteradm.crt
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+      register: kube_ca_clusteradm_crt
+
     - name: Kube-install-join | create pki directory on node
       ansible.builtin.file:
         path: /etc/kubernetes/pki
@@ -80,6 +101,13 @@
       ansible.builtin.copy:
         content: "{{ kube_ca_crt.content | b64decode }}"
         dest: /etc/kubernetes/pki/ca.crt
+        mode: '0644'
+      become: true
+
+    - name: Kube-install-join | install merged CA bundle on node
+      ansible.builtin.copy:
+        content: "{{ (kube_ca_clusteradm_crt.content | b64decode) + (kube_ca_crt.content | b64decode) }}"
+        dest: /etc/kubernetes/pki/ca-bundle.crt
         mode: '0644'
       become: true
 
@@ -199,6 +227,13 @@
         mode: '0644'
       become: true
 
+    - name: Kube-install-join | reinstall merged CA bundle wiped by kubeadm reset
+      ansible.builtin.copy:
+        content: "{{ (kube_ca_clusteradm_crt.content | b64decode) + (kube_ca_crt.content | b64decode) }}"
+        dest: /etc/kubernetes/pki/ca-bundle.crt
+        mode: '0644'
+      become: true
+
     - name: Kube-install-join | remove stale kubelet artifacts
       ansible.builtin.file:
         path: "{{ item }}"
@@ -244,6 +279,15 @@
         content: |
           apiVersion: kubelet.config.k8s.io/v1beta1
           kind: KubeletConfiguration
+          authentication:
+            anonymous:
+              enabled: false
+            webhook:
+              enabled: true
+            x509:
+              clientCAFile: /etc/kubernetes/pki/ca-bundle.crt
+          authorization:
+            mode: Webhook
           cgroupDriver: systemd
           clusterDNS:
             - {{ orchestration_kube_dns_ip }}

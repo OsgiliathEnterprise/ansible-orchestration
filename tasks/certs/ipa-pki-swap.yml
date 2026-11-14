@@ -110,6 +110,18 @@
   become: true
   register: kubelet_config_override
 
+# The API server authenticates to kubelets with apiserver-kubelet-client.crt, which the
+# PKI swap re-issues under CA #2 (kubeclusteradm). The kubeadm-generated kubelet config
+# pins clientCAFile to ca.crt (CA #1 only), so kubelet rejects the API-server-proxied
+# exec/logs/port-forward subresources with 401 Unauthorized. Trust the merged bundle.
+- name: Ipa-pki-swap | point kubelet x509 client auth at the merged CA bundle
+  ansible.builtin.replace:
+    path: /var/lib/kubelet/config.yaml
+    regexp: '^(\s*)clientCAFile: /etc/kubernetes/pki/ca\.crt\s*$'
+    replace: '\1clientCAFile: {{ kubernetes_certificates_path }}ca-bundle.crt'
+  become: true
+  register: kubelet_client_ca_patch
+
 - name: Ipa-pki-swap | restart kubelet to load post-swap CA and client cert # noqa: no-handler
   # The running kubelet pinned the pre-swap CA and client cert at startup (both are read only at
   # boot); after the swap it cannot authenticate to the API (unknown authority) and the master
@@ -120,7 +132,7 @@
     name: kubelet
     state: restarted
   become: true
-  when: kubelet_config_override is changed
+  when: kubelet_config_override is changed or kubelet_client_ca_patch is changed
 
 - name: Ipa-pki-swap | wait for master node to report Ready with post-swap trust
   # Functional gate, not just a sleep: the restarted kubelet must re-establish heartbeats
@@ -158,3 +170,18 @@
 # pod mounts the post-swap CA) and after cluster stabilization. No-op when Calico is absent.
 - name: Ipa-pki-swap | recover Calico/Tigera data-plane workloads after CA swap
   ansible.builtin.include_tasks: calico-ca-recovery.yml
+
+# Kubeadm self-signed CA retirement (design D5): once every post-swap verification
+# gate above passed, nothing on the master may trust or hold the kubeadm CA any
+# more. Its private key and certificate are deleted, and the transient gate anchor
+# built in ipa-certs.yml is swept with them. KCM's cluster-signing flags were
+# already emptied in ipa-certs.yml, so no signer can reach these files.
+- name: Ipa-pki-swap | retire kubeadm self-signed CA from the master
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
+    - "{{ kubernetes_certificates_path }}ca.key"
+    - /tmp/kube-api-gate-anchor.crt
+  become: true
