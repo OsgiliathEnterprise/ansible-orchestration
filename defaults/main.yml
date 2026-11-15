@@ -47,6 +47,17 @@ orchestration_readiness_delay: 5
 # soon as the profile appears, so healthy runs are unaffected.
 kube_join_profile_ready_retries: 120
 kube_join_profile_ready_delay: 10
+# Budget for the calico-node pod Ready gate in tasks/kube-install.yml (fifth bucket,
+# Travis kvm #108): the tcharl.kubernetes role applies the Tigera Installation and returns
+# WITHOUT waiting for calico-node pods, and the coredns restart used to fire immediately
+# after; on cold CI runners the calico image pull takes >8 min, so CNI never initialized
+# and every coredns poll observed unavailableReplicas: 3 until KCM declared
+# ProgressDeadlineExceeded. 48 x 10s = ~8 min ceiling — a ceiling, not a floor: the gate
+# passes as soon as this node's calico-node is Ready, so warm clusters add seconds.
+# Combined with the rollout wait below it stays inside the kube_join_profile_ready ceiling
+# above so the master can never starve the node join gate behind these waits.
+kube_calico_node_ready_retries: 48
+kube_calico_node_ready_delay: 10
 kubernetes_rollout_wait_timeout: 300
 # updateStrategy override applied to the calico-node DaemonSet by the post-swap
 # CA-recovery patch (tasks/certs/calico-ca-recovery.yml): the 100% default restarts all
