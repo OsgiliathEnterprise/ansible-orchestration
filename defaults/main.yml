@@ -60,7 +60,14 @@ kube_join_profile_ready_delay: 10
 # Ready, so warm clusters add seconds.
 # Combined with the rollout wait below it stays inside the kube_join_profile_ready ceiling
 # above so the master can never starve the node join gate behind these waits.
+# Phase split (Travis kvm #110 post-mortem): #110 was killed by the 90-min travis_wait
+# wall while the gate was still polling, so the named fail's pod-level evidence never
+# reached the CI log. The gate now polls phase_a_retries first, dumps CALICO-DIAG pod /
+# operator / event evidence when that exhausts, then burns the remaining
+# (retries - phase_a_retries) polls. Phase A is sized for a healthy-but-slow bring-up;
+# evidence lands in the log after ~3.5 min instead of never.
 kube_calico_node_ready_retries: 90
+kube_calico_node_ready_phase_a_retries: 20
 kube_calico_node_ready_delay: 10
 kubernetes_rollout_wait_timeout: 300
 # updateStrategy override applied to the calico-node DaemonSet by the post-swap

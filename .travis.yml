@@ -5,6 +5,31 @@ dist: noble
 language: python
 python:
   - "3.13"
+# Wall-clock budget (Travis kvm post-mortem from the full #111 log, guest-clock timeline
+# calibrated to the script kill): the job died at exactly the `travis_wait 90` wall
+# (script duration 5400s, exit 137) just as the calico-node Ready gate STARTED — the gate
+# was never the hog. The ~87 min before it broke down as: ~49 min molecule bootstrap +
+# dependency (duplicate galaxy installs) + create (the ~1 GB box re-downloaded from
+# fedoraproject.org on every cold worker + 3 nested-virt boots), ~24 min FreeIPA server
+# install, ~8 min remaining prepare, ~6.5 min converge to kubeadm init + gate. Caching the
+# box and dropping the duplicate dependency step target the two dominant, fully
+# recoverable chunks; the private-repo 120-min hard job limit (docs.travis-ci.com/user/
+# customizing-the-build -> Build Timeouts) stays as the backstop.
+# - $HOME/.vagrant.d/boxes: the Fedora 44 cloud box (~1 GB) was re-downloaded from
+#   fedoraproject.org on every cold worker; caching it removes that from every run after
+#   the first.
+# - gems/plugins.json: skips rebuilding the vagrant-libvirt plugin's native gems.
+# - $HOME/.cache/uv: makes the tox env + molecule dep tree install reuse uv's wheel/env
+#   cache instead of re-resolving and re-installing every build.
+# timeout: the default 3-min cache window cannot pack a ~1 GB box cache; it silently
+# dropped saves at the default.
+cache:
+  directories:
+    - $HOME/.vagrant.d/boxes
+    - $HOME/.vagrant.d/gems
+    - $HOME/.vagrant.d/plugins.json
+    - $HOME/.cache/uv
+  timeout: 900
 addons:
   apt:
     sources:
@@ -42,7 +67,16 @@ script:
   - mv ../ansible-orchestration ../tcharl.ansible_orchestration
   - uv tool run --python 3.13 --from ansible-core ansible-galaxy role install -r requirements-standalone.yml
   - uv tool run --python 3.13 --from ansible-core ansible-galaxy collection install -r requirements-collections.yml
-  - travis_wait 90 uv tool run --python 3.13 --with tox tox -e test-exec -- --scenario-name kvm
+  # DEPENDENCY_ENABLED=False: molecule's dependency step (molecule/kvm/molecule.yml) would
+  # re-run the exact two ansible-galaxy installs above into the same default paths — pure
+  # duplicate wall time. The install-phase installs above are the single source.
+  # travis_wait 115 (was 90): travis_wait SIGKILLs the wrapped command at its own limit
+  # (exit 137) independently of the job's 120-min hard wall; at 90 it was a SECOND, lower
+  # wall that killed mid-converge runs which still had job budget left (#111 died at its
+  # exact 5400s mark). 115 keeps the keep-alive running for the whole usable window and
+  # leaves the hard limit as the only wall. With the box cache warm, expected wall time is
+  # ~50 min create+prepare + ~15 min calico gate + ~25-35 min certs/join/verify.
+  - travis_wait 115 env DEPENDENCY_ENABLED=False uv tool run --python 3.13 --with tox tox -e test-exec -- --scenario-name kvm
 branches:
   only:
     - master

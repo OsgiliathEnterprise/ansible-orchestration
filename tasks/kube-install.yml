@@ -148,17 +148,137 @@
   # restart on this node needs, and workers join later via kube-install-join-node.yml.
   # failed_when: false keeps exhaustion inside our control so the named fail below owns
   # the failure with pod-level evidence (bare until-retries aborts on final attempt).
+  # Split into phase A + diagnostics + phase B (Travis kvm #110 post-mortem): #110 was
+  # killed by the 90-min travis_wait wall WHILE this gate polled, so the pod-level
+  # evidence carried by the named fail never reached the log. Phase A burns only a
+  # fraction of the budget; when it exhausts, the diagnostic tasks below dump the
+  # calico-system / tigera-operator pod states into the log BEFORE the remaining
+  # phase B budget is spent.
+  # Param discipline (kvm #108 post-mortem): this pinned kubernetes.core does NOT
+  # support all_namespaces nor the singular label_selector/field_selector — passing
+  # them raises "Unsupported parameters", which failed_when: false used to swallow,
+  # leaving the gate polling an empty list until it killed the run. Scope with the
+  # plural list params and the namespace tigera-operator always places calico-node
+  # in (Calico typha variant; verified on the live cluster), matching the known-good
+  # query in tasks/certs/calico-ca-recovery.yml.
   kubernetes.core.k8s_info:
     kubeconfig: "{{ kube_config_path }}"
     api_version: v1
     kind: Pod
-    # Param discipline (kvm #108 post-mortem): this pinned kubernetes.core does NOT
-    # support all_namespaces nor the singular label_selector/field_selector — passing
-    # them raises "Unsupported parameters", which failed_when: false used to swallow,
-    # leaving the gate polling an empty list until it killed the run. Scope with the
-    # plural list params and the namespace tigera-operator always places calico-node
-    # in (Calico typha variant; verified on the live cluster), matching the known-good
-    # query in tasks/certs/calico-ca-recovery.yml.
+    namespace: calico-system
+    label_selectors:
+      - "k8s-app=calico-node"
+    field_selectors:
+      - "spec.nodeName={{ inventory_hostname }}"
+  register: kube_calico_node_pods_phase_a
+  until: >-
+    kube_calico_node_pods_phase_a.resources | default([]) | length > 0
+    and kube_calico_node_pods_phase_a.resources
+        | map(attribute='status.phase', default='') | select('equalto', 'Running') | list | length > 0
+    and kube_calico_node_pods_phase_a.resources
+        | map(attribute='status.conditions', default=[]) | flatten | default([], true)
+        | selectattr('type', 'equalto', 'Ready')
+        | selectattr('status', 'equalto', 'True') | list | length > 0
+  retries: "{{ kube_calico_node_ready_phase_a_retries }}"
+  delay: "{{ kube_calico_node_ready_delay }}"
+  failed_when: false
+  when: kube_masters_group in group_names
+  become: yes
+
+# ---------------------------------------------------------------------------
+# Interim diagnostics (Travis kvm #110): when phase A exhausts without the pod
+# becoming Ready, dump why BEFORE spending the rest of the gate budget — a CI
+# run killed by the wall then still shows container waiting reasons, operator
+# state and cluster events in its log. Read-only k8s_info probes; every one is
+# failed_when: false so diagnostics can never turn a passing run into a failure.
+# ---------------------------------------------------------------------------
+
+- name: Kube-install | Diagnostics | List all calico-system pods
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config_path }}"
+    api_version: v1
+    kind: Pod
+    namespace: calico-system
+  register: kube_calico_diag_pods
+  failed_when: false
+  when:
+    - kube_masters_group in group_names
+    - not (kube_calico_node_pods_phase_a.resources | default([]) | length > 0
+           and kube_calico_node_pods_phase_a.resources
+               | map(attribute='status.conditions', default=[]) | flatten | default([], true)
+               | selectattr('type', 'equalto', 'Ready')
+               | selectattr('status', 'equalto', 'True') | list | length > 0)
+  become: yes
+
+- name: Kube-install | Diagnostics | List tigera-operator pods
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config_path }}"
+    api_version: v1
+    kind: Pod
+    namespace: tigera-operator
+  register: kube_calico_diag_operator
+  failed_when: false
+  when:
+    - kube_masters_group in group_names
+    - not (kube_calico_node_pods_phase_a.resources | default([]) | length > 0
+           and kube_calico_node_pods_phase_a.resources
+               | map(attribute='status.conditions', default=[]) | flatten | default([], true)
+               | selectattr('type', 'equalto', 'Ready')
+               | selectattr('status', 'equalto', 'True') | list | length > 0)
+  become: yes
+
+- name: Kube-install | Diagnostics | List recent calico-system events
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config_path }}"
+    api_version: v1
+    kind: Event
+    namespace: calico-system
+  register: kube_calico_diag_events
+  failed_when: false
+  when:
+    - kube_masters_group in group_names
+    - not (kube_calico_node_pods_phase_a.resources | default([]) | length > 0
+           and kube_calico_node_pods_phase_a.resources
+               | map(attribute='status.conditions', default=[]) | flatten | default([], true)
+               | selectattr('type', 'equalto', 'Ready')
+               | selectattr('status', 'equalto', 'True') | list | length > 0)
+  become: yes
+
+- name: Kube-install | Diagnostics | Print calico bring-up state
+  ansible.builtin.debug:
+    msg: |-
+      CALICO-DIAG (phase A exhausted after {{ (kube_calico_node_ready_phase_a_retries | int + 1) * (kube_calico_node_ready_delay | int) }} s, pod still not Ready):
+      this node's calico-node: {{ kube_calico_node_pods_phase_a.resources | default([], true)
+        | map(attribute='metadata.name', default='(none)') | list }}
+        phases {{ kube_calico_node_pods_phase_a.resources | default([], true)
+        | map(attribute='status.phase', default='') | list }}
+      calico-system pods:
+      {% for p in kube_calico_diag_pods.resources | default([], true) %}
+      - {{ p.metadata.name }} phase={{ p.status.phase | default('?') }} restarts={{ p.status.containerStatuses | default([], true) | map(attribute='restartCount', default=0) | list }} waiting={{ p.status.containerStatuses | default([], true) | map(attribute='state.waiting.reason', default='') | select | list }}
+      {% endfor %}
+      tigera-operator pods:
+      {% for p in kube_calico_diag_operator.resources | default([], true) %}
+      - {{ p.metadata.name }} phase={{ p.status.phase | default('?') }} restarts={{ p.status.containerStatuses | default([], true) | map(attribute='restartCount', default=0) | list }} waiting={{ p.status.containerStatuses | default([], true) | map(attribute='state.waiting.reason', default='') | select | list }} images={{ p.spec.containers | default([], true) | map(attribute='image') | list }}
+      {% endfor %}
+      recent calico-system events (reason/target/message):
+      {% for e in (kube_calico_diag_events.resources | default([], true))[-25:] %}
+      - {{ e.reason | default('?') }}/{{ e.involvedObject.kind | default('?') }}/{{ e.involvedObject.name | default('?') }}: {{ (e.message | default('')) | truncate(140, true) }}
+      {% endfor %}
+  when:
+    - kube_masters_group in group_names
+    - not (kube_calico_node_pods_phase_a.resources | default([]) | length > 0
+           and kube_calico_node_pods_phase_a.resources
+               | map(attribute='status.conditions', default=[]) | flatten | default([], true)
+               | selectattr('type', 'equalto', 'Ready')
+               | selectattr('status', 'equalto', 'True') | list | length > 0)
+
+- name: Kube-install | Wait (phase B) for this node's calico-node pod to be Ready
+  # Remaining budget after phase A. Same query shape; register keeps the historical
+  # name so the named fail below reads the LAST observed state.
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kube_config_path }}"
+    api_version: v1
+    kind: Pod
     namespace: calico-system
     label_selectors:
       - "k8s-app=calico-node"
@@ -173,7 +293,7 @@
         | map(attribute='status.conditions', default=[]) | flatten | default([], true)
         | selectattr('type', 'equalto', 'Ready')
         | selectattr('status', 'equalto', 'True') | list | length > 0
-  retries: "{{ kube_calico_node_ready_retries }}"
+  retries: "{{ (kube_calico_node_ready_retries | int) - (kube_calico_node_ready_phase_a_retries | int) }}"
   delay: "{{ kube_calico_node_ready_delay }}"
   failed_when: false
   when: kube_masters_group in group_names
@@ -192,6 +312,7 @@
       query error: {{ kube_calico_node_pods.msg | default('none') }}
       ). CNI never initialized, so coredns could not start: calico image pull or
       tigera-operator failure upstream, or a broken gate query (see query error).
+      Pod-level detail was already dumped by the CALICO-DIAG tasks above.
   when:
     - kube_masters_group in group_names
     - not (kube_calico_node_pods.resources | default([]) | length > 0
@@ -199,7 +320,6 @@
                | map(attribute='status.conditions', default=[]) | flatten | default([], true)
                | selectattr('type', 'equalto', 'Ready')
                | selectattr('status', 'equalto', 'True') | list | length > 0)
-
 - name: Kube-install | Restarts coredns after calico installation # needed to fix kubernetes internal dns resolution
   # Explicit kubeconfig+context: at this point /root/.kube/config does not exist yet (it is only
   # symlinked later in ipa-pki-swap), so a bare kubectl call would fail and the old failed_when:false

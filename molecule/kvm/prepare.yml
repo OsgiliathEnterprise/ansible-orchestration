@@ -105,3 +105,25 @@
   vars:
     swap_file_state: absent
   become: Yes
+
+  tasks:
+    # Warm the calico image cache before converge (Travis kvm #105-#110): since the
+    # tigera-operator flow the master must pull tigera/operator + calico node/calico
+    # images (all quay.io) during converge, and on cold CI runners those pulls ate the
+    # calico-node Ready gate budget. No native ansible module for crictl pull; failures
+    # are ignored on purpose — this is a cache warm-up, converge re-pulls if needed.
+    # Keep the tags in sync with defaults/main.yml (calico_cni_version) and the
+    # tigera-operator.yaml manifest pinned by tcharl.kubernetes.
+    - name: Pre-pull calico images for converge
+      ansible.builtin.command: "crictl pull {{ item }}"
+      loop:
+        - quay.io/tigera/operator:v1.44.0
+        - quay.io/calico/node:v3.33.0
+        - quay.io/calico/calico:v3.33.0
+      register: kvm_calico_prepull
+      until: kvm_calico_prepull is not failed
+      retries: 3
+      delay: 10
+      failed_when: false
+      changed_when: false
+      become: Yes

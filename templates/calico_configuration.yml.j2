@@ -22,38 +22,15 @@ spec:
     nodeAddressAutodetectionV4:
       canReach: {{ orchestration_idm_ip }}
 {% endif %}
----
 
-# This section configures the Calico API server.
-# For more information, see: https://projectcalico.docs.tigera.io/master/reference/installation/api#operator.tigera.io/v1.APIServer
-apiVersion: operator.tigera.io/v1
-kind: APIServer
-metadata:
-  name: default
-spec: {}
-
----
-
-# This section configures the Calico Gateway API.
-# For more information, see: https://projectcalico.docs.tigera.io/master/reference/installation/api#operator.tigera.io/v1.GatewayAPI
-apiVersion: operator.tigera.io/v1
-kind: GatewayAPI
-metadata:
-  name: default
-spec: {}
-
----
-
-# Configures the Calico Goldmane flow aggregator.
-apiVersion: operator.tigera.io/v1
-kind: Goldmane
-metadata:
-  name: default
-
----
-
-# Configures the Calico Whisker observability UI.
-apiVersion: operator.tigera.io/v1
-kind: Whisker
-metadata:
-  name: default
+# Optional v3.33 components are deliberately NOT installed: the APIServer,
+# GatewayAPI (envoy-gateway), Goldmane and Whisker CRs each schedule extra
+# control-plane workloads (calico-apiserver, envoy-gateway, goldmane, whisker)
+# on the master. The kvm CI master is 2 GB, and since the tigera-operator flow
+# (cf8ac18, calico v3.33.0) calico-node has never reached Ready there within the
+# gate budget — the starved master cannot bring up the full component set in
+# time (Travis #105–#110; last green #104 ran the plain-manifest flow v3.32.1
+# which had none of these). Nothing in this role uses them: calicoctl is only
+# downloaded (never executed), cert recovery reads DaemonSet/Node/Pod via the
+# k8s API directly, and the testinfra suite asserts only on the core workloads
+# (calico-node / typha / kube-controllers).
