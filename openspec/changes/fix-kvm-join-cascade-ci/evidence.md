@@ -400,3 +400,14 @@ cluster — `converge-monorepo` OK in 572 s, PLAY RECAP `failed=0 rescued=0` on 
 so the green RECAP proves the idempotent apply and the `observedGeneration`-gated rollout poll
 both succeeded on a live cluster); `verify-monorepo` 75/75 passed in 37.6 s — the prior 74
 plus the new static guard running under molecule.
+
+### CI delivery — build #108 (run #1 toward the two-green exit criterion)
+
+`d869e70` pushed to `upstream/parallel` and fast-forwarded to `master`
+(`f1ff4f5..d869e70`) 2026-11-15 23:0x UTC via `~/.ssh/github_nopass` (the `~/.ssh/github`
+key GitHub accepts is passphrase-locked with no keychain entry; `github_nopass` is the
+unprotected deploy key with write access to `OsgiliathEnterprise/ansible-orchestration`).
+Travis build **#108** = build id 279192481, job **641604415** (108.1), commit `d869e709`,
+branch `master`, started 2026-11-14T23:09:15Z. Monitored via
+`GET https://api.travis-ci.com/build/279192481/jobs` (job states) — the `/repo/…/builds/<number>`
+path is not a valid v3 controller; use the internal build id from the builds list.

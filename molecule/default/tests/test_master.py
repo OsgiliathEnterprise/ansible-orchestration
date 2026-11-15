@@ -633,5 +633,49 @@ def test_coredns_restart_is_load_tolerant():
         "readyReplicas",
         "coredns restart annotation could not be applied",
         "never reported a complete restarted rollout",
+        "state.waiting.reason",
     ):
         assert needle in block, f"coredns restart block must reference {needle!r}"
+
+
+def test_calico_node_gate_precedes_coredns_restart():
+    """The coredns restart must be preceded by a gate on THIS node's calico-node pod
+    being Ready (Travis kvm build #108: the tcharl.kubernetes role applies the Tigera
+    Installation and returns without waiting for calico-node; on cold CI runners the
+    image pull took >8 min, CNI never initialized, and all 24 coredns rollout polls
+    observed unavailableReplicas: 3 until KCM declared ProgressDeadlineExceeded).
+    Contract pinned here: a k8s_info poll on label k8s-app=calico-node with
+    field_selector spec.nodeName=<this host>, until/retries/failed_when:false on
+    configurable budget vars, and a named fail carrying pod/phases/container-state
+    evidence — and it must sit BEFORE the coredns restart task. Static file check."""
+    role_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    task_file = os.path.join(role_root, "tasks", "kube-install.yml")
+    with open(task_file, encoding="utf-8") as fh:
+        body = fh.read()
+    gate_start = body.index("calico-node pod to be Ready before restarting coredns")
+    gate_end = body.index("Restarts coredns after calico installation")
+    assert gate_start < gate_end, "calico-node Ready gate must precede the coredns restart"
+    block = body[gate_start:gate_end]
+    for needle in (
+        "kubernetes.core.k8s_info",
+        "k8s-app=calico-node",
+        "all_namespaces: true",
+        "spec.nodeName={{ inventory_hostname }}",
+        "failed_when: false",
+        "kube_calico_node_ready_retries",
+        "kube_calico_node_ready_delay",
+        "never became Ready",
+        "containerStatuses",
+    ):
+        assert needle in block, f"calico-node gate block must reference {needle!r}"
+    # Regression pin: the tigera-operator puts calico-node in calico-system; a
+    # namespace: kube-system scoped query silently matches zero pods and starves the gate.
+    assert "namespace: kube-system" not in block, (
+        "calico-node gate must not be namespace-scoped to kube-system "
+        "(tigera-operator deploys calico-node in calico-system)")
+    # Budget must live in defaults (scenario-tunable), not be hardcoded in the task.
+    defaults_file = os.path.join(role_root, "defaults", "main.yml")
+    with open(defaults_file, encoding="utf-8") as fh:
+        defaults = fh.read()
+    assert "kube_calico_node_ready_retries:" in defaults, "gate budget must live in defaults"
+    assert "kube_calico_node_ready_delay:" in defaults, "gate delay must live in defaults"
