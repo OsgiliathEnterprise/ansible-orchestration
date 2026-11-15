@@ -69,10 +69,16 @@
   kubernetes.core.k8s_drain:
     name: "{{ hostvars[registeredhost].hostname | default(registeredhost) }}"
     state: drain
-    force: true
-    ignore_daemonsets: true
-    delete_emptydir_data: true
-    terminate_grace_period: 800
+    # Param discipline (Travis #109: the flat forms below raised "Unsupported
+    # parameters for (kubernetes.core.k8s_drain) module: delete_emptydir_data, force,
+    # ignore_daemonsets, terminate_grace_period" and failed_when: false swallowed it —
+    # drain silently did nothing). The pinned collection takes the deletion flags only
+    # inside delete_options.
+    delete_options:
+      force: true
+      ignore_daemonsets: true
+      delete_emptydir_data: true
+      terminate_grace_period: 800
     kubeconfig: "{{ kube_config_path }}"
   become: Yes
   failed_when: false
