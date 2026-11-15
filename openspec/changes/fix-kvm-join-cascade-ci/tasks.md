@@ -103,6 +103,26 @@ genuinely did not exist during the node's 271 s window while the master stayed a
        name) shows the module accepts the shape (`Node … not found`, no
        `Unsupported parameters`); full audit of `travis_108.log` + `travis_109.log`
        confirms no other unsupported-parameter sites. **Implemented 2026-11-15.**
+- [x] 2.8 Remove the calico v3.33 control-plane overproduction that starves the CI master
+        (#110 post-mortem: calico-system created but calico-node never Ready; regression
+        window starts at `cf8ac18` "chore: switch to calico operator" v3.32.1 -> v3.33.0;
+        quay.io rate-limit hypothesis eliminated). Local CALICO-DIAG evidence: the
+        `tigera-gateway-api-gateway-helm-certgen-*` Jobs churn pods continuously and
+        envoy-gateway/goldmane/whisker/calico-webhooks run for the optional
+        APIServer/GatewayAPI/Goldmane/Whisker CRs this platform never uses; deleting the
+        four CRs reclaimed every optional pod with core calico 3/3 Ready. Fix (3 parts):
+        (a) trim `templates/calico_configuration.yml.j2` to the `Installation` CR only;
+        (b) restructure the calico-node gate in `tasks/kube-install.yml` into phase-A poll
+        (`kube_calico_node_ready_phase_a_retries`) -> CALICO-DIAG interim dump (pods +
+        tigera-operator state + Events, all probes `failed_when: false`) -> phase-B poll ->
+        named fail, so a future starvation self-reports instead of dying at the wall;
+        (c) pre-pull the three quay.io calico images in `molecule/kvm/prepare.yml` via
+        `crictl pull` (ignore-fail). Verification: template renders a single `Installation`
+        doc; diagnostics branch live-tested against the running cluster with a
+        forced-failure selector (all three sections render, phase-A/B exhaustion confirmed);
+        both static guards pass; full local cycle green - converge 678 s `failed=0` ->
+        verify 76/76 -> reconverge 660 s `failed=0` -> verify 76/76 (2026-11-15, parallels).
+        **Implemented 2026-11-15.**
 
 ## 3. Join hardening (unconditional)
 
@@ -114,7 +134,7 @@ genuinely did not exist during the node's 271 s window while the master stayed a
 ## 4. Verification
 
 - [x] 4.1 Full local cycle on the host-OS-matched scenario: `destroy → converge-monorepo → verify-monorepo` (parallels) plus a reconverge for idempotence. Verification: verify green (all nodes Ready, per-pod evidence, PV mounts) and reconverge reports no unexpected changes. **PASSED 2026-11-14 — both the warm run (converge 664 s + verify 74/74) and the formal cold-path protocol `destroy → converge (1850 s, fresh VMs + prepare) → verify (74/74) → reconverge (642 s, failed=0, rescued=0) → re-verify (74/74)` green end to end; PLAY RECAPs and verdicts in `evidence.md`. Reconverge `changed` residue is the pre-existing containerd-restart → kubelet-restart-handler chain only; the join path itself reported zero changes.**
-- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`. **Status: #107 failed at the coredns 504 (fixed by 2.5); #108 (`d869e709`) proved 2.5 as designed but failed at the fifth bucket — the broken calico-node gate query (fixed by 2.6); #109 (`6de7461`, PR #24 merge of the pre-fix `f4f44a5`) was CI-exposure of the fifth bucket — the gate's `Unsupported parameters` module error confirmed verbatim, master chain killed before profile creation, build then hit the 90-min `travis_wait` cap (see `evidence.md` #109 post-mortem; it also exposed the drain param site, fixed by 2.7). The two consecutive greens must be on the 2.6+2.7 commit: push → build is run #1; on green, same-commit restart gives run #2. Build URLs to be appended in `evidence.md` as they run.**
+- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`. **Status: #107 failed at the coredns 504 (fixed by 2.5); #108 (`d869e709`) proved 2.5 as designed but failed at the fifth bucket — the broken calico-node gate query (fixed by 2.6); #109 (`6de7461`, PR #24 merge of the pre-fix `f4f44a5`) was CI-exposure of the fifth bucket — the gate's `Unsupported parameters` module error confirmed verbatim, master chain killed before profile creation, build then hit the 90-min `travis_wait` cap (see `evidence.md` #109 post-mortem; it also exposed the drain param site, fixed by 2.7). The two consecutive greens must be on the 2.6+2.7+2.8 commit. **Update 2026-11-15: #110 (`09d110e1`) proved the param fixes CI-clean but died at the 90-min wall with the master's calico-node genuinely never Ready (seventh bucket, fixed by 2.8); #111 (`e6bcd345`) ERRORED at 2 min 20 s on the Travis cache `plugins.json`-as-directory bug (Errno::EISDIR in `vagrant plugin install`; fixed — entry dropped from `cache.directories` + self-heal guard in `install:`). Next build is run #1 toward the exit criterion; build URLs to be appended in `evidence.md` as they run.**
 - [x] 4.3 Structural test in `molecule/default/tests/test_node.py`: assert the join rescue references `kube_join_started_at`, `journalctl --since`, `crictl`, `ipa-getcert`, and the upstream attribution string. Verification: test passes locally (4.1) and fails if the rescue is reverted. **PASSED 2026-11-14 in the 74-test verify run (`test_join_rescue_carries_phase_diagnostics`); kvm symlink set covers `test_node.py` so the guard runs on CI too.**
 
 ## Workflow follow-up

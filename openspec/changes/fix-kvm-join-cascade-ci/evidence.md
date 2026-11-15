@@ -525,7 +525,73 @@ audit of both logs confirms exactly these two unsupported-parameter sites existe
 — it was never restarted; the transient `passed` reading was an API artifact. #108 stands
 FAILED as recorded.
 
-### CI delivery — build #110 (run #1 toward the two-green exit criterion)
+## Build #110 post-mortem (commit `09d110e1`, job 641606647 — FAILED, killed at the 90-min wall)
 
-_Pending: param-fix + drain-fix commit pushed after this record; build URL to be appended
-on dispatch._
+- **All shipped param fixes verified working on CI**: zero occurrences of
+  `Unsupported parameters for (kubernetes.core.k8s_info)` or the `k8s_drain` variant in
+  the full log (`travis_110.log`, ANSI-stripped, 9251 lines) — buckets 4/5/6 are closed
+  CI-confirmed.
+- The only pre-wall `fatal:` lines are the two benign idm check-probes present in every
+  log. `calico-system` namespace was created at 11:41:11Z (attempts=1) and the master's
+  calico-node pod genuinely **never reached Ready** on the 2 vCPU / 2 GB CI master.
+- The build was killed by the `travis_wait 90` wall itself (exit 137,
+  `duration ≈ 5400 s`, 12:26:15Z) mid-gate-poll — so the gate's pod-evidence dump never
+  reached the log. Diagnosis therefore moved to a local instrumented reproduction.
+- **Regression correlation**: first failure #105 is the first build containing `cf8ac18`
+  ("chore: switch to calico operator", v3.32.1 → v3.33.0 Tigera-operator flow); last
+  green #104 (`102866cc`) predates it. Docker.io rate-limit hypothesis **eliminated** —
+  every calico image resolves from quay.io.
+
+## Seventh bucket: calico v3.33 operator provisions unused control-plane components
+
+Local CALICO-DIAG dump against the 3-node parallels cluster (forced-failure selector +
+tiny budget, playbook `diag_test.yml`): the `tigera-gateway-api-gateway-helm-certgen-*`
+Jobs churn pods **continuously**, and `envoy-gateway`, `goldmane`, `whisker`,
+`calico-webhooks` (+ `calico-apiserver` ns) all run — control-plane components v3.33's
+Installation-based provisioning creates for the optional APIServer/GatewayAPI/Goldmane/
+Whisker CRs, none of which this platform uses. On the starved CI master this is the
+Ready-never-arrives mechanism. Deleting the four optional CRs reclaimed every optional
+pod; core calico stayed 3/3 Ready with all nodes Ready.
+
+Fix (all in-role, no cross-role change — the tigera-operator manifest is a remote URL in
+`oss/tcharl.kubernetes`):
+
+1. `templates/calico_configuration.yml.j2` trimmed to the `Installation` CR only (dropped
+   APIServer/GatewayAPI/Goldmane/Whisker CRs; grep-verified no task/test references them).
+2. `tasks/kube-install.yml` gate restructured: phase-A poll
+   (`kube_calico_node_ready_phase_a_retries: 20` × 10 s) → **CALICO-DIAG** interim dump
+   (calico-system pods + tigera-operator pods/images + recent Events, every probe
+   `failed_when: false`) → phase-B poll (register keeps `kube_calico_node_pods`) → named
+   fail with explicit `when:`. The diagnostics branch was live-tested against the running
+   cluster: all three sections render with real data, phase-A/B exhaustion confirmed.
+3. `molecule/kvm/prepare.yml` pre-pulls the three quay.io calico images via `crictl pull`
+   (ignore-fail) so the gate window never pays cold-pull cost.
+
+**Local regression (2026-11-15, parallels, post host-restart resume): PASSED** — converge
+678 s `failed=0` all hosts → verify **76/76** → reconverge 660 s `failed=0` → verify
+**76/76**. Environment note: the host restart had suspended the four molecule VMs; after
+`vagrant resume`, idm's firewalld had lost the runtime IPA service rules that
+`ipa-server-install` adds (suspend/resume artifact, not a role regression — a fresh
+`destroy → converge` rebuilds them) → re-added the `freeipa-*`/kerberos/kpasswd/dns/https
+services and `--runtime-to-permanent`; chrony skew across all four hosts < 2 ms before
+the green runs.
+
+## Build #111 post-mortem (commit `e6bcd345` — ERRORED at 2 min 20 s)
+
+First build carrying the CI budget/cache block. Failure was self-inflicted by the cache
+config, not the role:
+
+- Cold cache (`could not download cache`) → casher processed `cache.directories` and
+  `creating directory /home/travis/.vagrant.d/plugins.json` — Travis cache entries must be
+  **directories**; `plugins.json` is a file, so the setup created it as a directory.
+- `vagrant plugin install vagrant-libvirt` then died immediately:
+  `Is a directory @ io_fread - /home/travis/.vagrant.d/plugins.json (Errno::EISDIR)` →
+  build stopped at 2 min 20 s.
+- Fix (this commit): `plugins.json` removed from the cache list; a self-heal guard in
+  `install:` deletes the poisoned directory if the errored run uploaded it into the
+  branch cache; the failure mode is documented in the cache-block comment.
+
+### CI delivery — run #1 toward the two-green exit criterion
+
+_Pending: this `.travis.yml` cache fix pushed as the next commit; the resulting build is
+run #1. Build URL to be appended on dispatch._

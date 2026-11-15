@@ -18,7 +18,13 @@ python:
 # - $HOME/.vagrant.d/boxes: the Fedora 44 cloud box (~1 GB) was re-downloaded from
 #   fedoraproject.org on every cold worker; caching it removes that from every run after
 #   the first.
-# - gems/plugins.json: skips rebuilding the vagrant-libvirt plugin's native gems.
+# - gems: skips rebuilding the vagrant-libvirt plugin's native gems. NOTE:
+#   $HOME/.vagrant.d/plugins.json must NOT be cached — Travis cache "directories"
+#   entries must be directories, and the cache setup on a cold run created
+#   plugins.json as a DIRECTORY, which made every `vagrant` invocation die with
+#   `Errno::EISDIR` reading the plugin state file (#111 errored at 2 min exactly
+#   this way). The plugin registry is rebuilt each run; the cached gems make that
+#   a near-no-op.
 # - $HOME/.cache/uv: makes the tox env + molecule dep tree install reuse uv's wheel/env
 #   cache instead of re-resolving and re-installing every build.
 # timeout: the default 3-min cache window cannot pack a ~1 GB box cache; it silently
@@ -27,7 +33,6 @@ cache:
   directories:
     - $HOME/.vagrant.d/boxes
     - $HOME/.vagrant.d/gems
-    - $HOME/.vagrant.d/plugins.json
     - $HOME/.cache/uv
   timeout: 900
 addons:
@@ -59,6 +64,11 @@ addons:
       - vagrant
 
 install:
+  # Self-heal: #111's cold cache setup created $HOME/.vagrant.d/plugins.json as a
+  # DIRECTORY, which kills every vagrant call (Errno::EISDIR). If that poisoned
+  # cache was uploaded by the errored run it will be restored until a good cache
+  # replaces it — remove the directory so vagrant can recreate the state file.
+  - '[ -d "$HOME/.vagrant.d/plugins.json" ] && rm -rf "$HOME/.vagrant.d/plugins.json" || true'
   - vagrant plugin install vagrant-libvirt
   - pip install uv
   - sudo chmod o+rwx /var/run/libvirt/libvirt-sock
