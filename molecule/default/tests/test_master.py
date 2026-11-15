@@ -636,6 +636,14 @@ def test_coredns_restart_is_load_tolerant():
         "state.waiting.reason",
     ):
         assert needle in block, f"coredns restart block must reference {needle!r}"
+    # Regression pin (the #108 bug class, same module): the pod-evidence query inside
+    # this block must use the plural label_selectors param — the singular form raises
+    # "Unsupported parameters" and would hard-fail the task when reached.
+    assert "label_selectors:" in block, "coredns pod-evidence query must use plural label_selectors"
+    for banned in ("label_selector:", "field_selector:", "all_namespaces:"):
+        assert banned not in block, (
+            f"coredns restart block must use plural selector params; {banned!r} is "
+            "unsupported by the pinned kubernetes.core")
 
 
 def test_calico_node_gate_precedes_coredns_restart():
@@ -644,10 +652,15 @@ def test_calico_node_gate_precedes_coredns_restart():
     Installation and returns without waiting for calico-node; on cold CI runners the
     image pull took >8 min, CNI never initialized, and all 24 coredns rollout polls
     observed unavailableReplicas: 3 until KCM declared ProgressDeadlineExceeded).
-    Contract pinned here: a k8s_info poll on label k8s-app=calico-node with
-    field_selector spec.nodeName=<this host>, until/retries/failed_when:false on
-    configurable budget vars, and a named fail carrying pod/phases/container-state
-    evidence — and it must sit BEFORE the coredns restart task. Static file check."""
+    Contract pinned here: a k8s_info poll on label k8s-app=calico-node with the
+    PLURAL selector params (label_selectors/field_selectors — the pinned
+    kubernetes.core rejects the singular label_selector/field_selector and
+    all_namespaces outright, and failed_when:false used to swallow that arg error,
+    leaving the gate polling an empty list: #108 post-mortem) scoped to
+    namespace: calico-system, with spec.nodeName=<this host>,
+    until/retries/failed_when:false on configurable budget vars, and a named fail
+    carrying pod/phases/container-state/query-error evidence — and it must sit
+    BEFORE the coredns restart task. Static file check."""
     role_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     task_file = os.path.join(role_root, "tasks", "kube-install.yml")
     with open(task_file, encoding="utf-8") as fh:
@@ -659,15 +672,26 @@ def test_calico_node_gate_precedes_coredns_restart():
     for needle in (
         "kubernetes.core.k8s_info",
         "k8s-app=calico-node",
-        "all_namespaces: true",
+        "namespace: calico-system",
+        "label_selectors:",
+        "field_selectors:",
         "spec.nodeName={{ inventory_hostname }}",
         "failed_when: false",
         "kube_calico_node_ready_retries",
         "kube_calico_node_ready_delay",
         "never became Ready",
         "containerStatuses",
+        "query error:",
     ):
         assert needle in block, f"calico-node gate block must reference {needle!r}"
+    # Regression pins (the #108 bug class): the pinned kubernetes.core module only
+    # accepts the plural list params and namespace; the singular forms or
+    # all_namespaces raise "Unsupported parameters" and failed_when:false hides it
+    # behind an empty resources list.
+    for banned in ("label_selector:", "field_selector:", "all_namespaces:"):
+        assert banned not in block, (
+            f"calico-node gate must use plural selector params; {banned!r} is "
+            "unsupported by the pinned kubernetes.core and self-silences")
     # Regression pin: the tigera-operator puts calico-node in calico-system; a
     # namespace: kube-system scoped query silently matches zero pods and starves the gate.
     assert "namespace: kube-system" not in block, (

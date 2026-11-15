@@ -152,13 +152,18 @@
     kubeconfig: "{{ kube_config_path }}"
     api_version: v1
     kind: Pod
-    # Cluster-wide query, NOT scoped to kube-system: the tigera-operator places
-    # calico-node in calico-system (verified on the live cluster; a kube-system-scoped
-    # query returned zero pods and starved this gate on the warm regression run).
-    # The label + nodeName field selector keep the query specific.
-    all_namespaces: true
-    label_selector: "k8s-app=calico-node"
-    field_selector: "spec.nodeName={{ inventory_hostname }}"
+    # Param discipline (kvm #108 post-mortem): this pinned kubernetes.core does NOT
+    # support all_namespaces nor the singular label_selector/field_selector — passing
+    # them raises "Unsupported parameters", which failed_when: false used to swallow,
+    # leaving the gate polling an empty list until it killed the run. Scope with the
+    # plural list params and the namespace tigera-operator always places calico-node
+    # in (Calico typha variant; verified on the live cluster), matching the known-good
+    # query in tasks/certs/calico-ca-recovery.yml.
+    namespace: calico-system
+    label_selectors:
+      - "k8s-app=calico-node"
+    field_selectors:
+      - "spec.nodeName={{ inventory_hostname }}"
   register: kube_calico_node_pods
   until: >-
     kube_calico_node_pods.resources | default([]) | length > 0
@@ -183,9 +188,10 @@
       phases {{ kube_calico_node_pods.resources | default([]) | map(attribute='status.phase', default='') | list }},
       container states {{ kube_calico_node_pods.resources | default([])
         | map(attribute='status.containerStatuses', default=[]) | flatten | default([], true)
-        | map(attribute='state') | list }}
+        | map(attribute='state') | list }},
+      query error: {{ kube_calico_node_pods.msg | default('none') }}
       ). CNI never initialized, so coredns could not start: calico image pull or
-      tigera-operator failure upstream.
+      tigera-operator failure upstream, or a broken gate query (see query error).
   when:
     - kube_masters_group in group_names
     - not (kube_calico_node_pods.resources | default([]) | length > 0
@@ -285,7 +291,9 @@
     api_version: v1
     kind: Pod
     namespace: kube-system
-    label_selector: "k8s-app=kube-dns"
+    # Plural param: singular label_selector is unsupported by the pinned kubernetes.core.
+    label_selectors:
+      - "k8s-app=kube-dns"
   register: kube_coredns_pods_evidence
   when:
     - kube_masters_group in group_names
