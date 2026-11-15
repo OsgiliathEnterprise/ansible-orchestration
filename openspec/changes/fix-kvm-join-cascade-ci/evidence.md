@@ -411,3 +411,121 @@ Travis build **#108** = build id 279192481, job **641604415** (108.1), commit `d
 branch `master`, started 2026-11-14T23:09:15Z. Monitored via
 `GET https://api.travis-ci.com/build/279192481/jobs` (job states) — the `/repo/…/builds/<number>`
 path is not a valid v3 controller; use the internal build id from the builds list.
+
+## Build #108 post-mortem (commit `d869e709`, job 641604415 — FAILED, ~94 min)
+
+Fifth bucket: the master died at the **coredns rollout wait**, and the investigation closed
+the root cause as a **broken calico-node Ready gate query** — the gate added after #107 never
+actually polled anything.
+
+### What the hardened tasks proved (they behaved exactly as designed)
+
+- Coredns idempotent apply: attempt 1 succeeded at 23:56:58Z — the #107 504 class is fixed.
+- Rollout wait: all 24 polls ran and reported `unavailableReplicas: 3`; the named fail
+  `never reported a complete restarted rollout` fired with pod evidence (log line 8102,
+  `travis_108.log` ANSI-stripped). Master first fatal; no anonymous until-exhaustion.
+- Both nodes: profile gate waited its full join-scale budget, named fail + rescue with
+  upstream evidence fired (join fix still confirmed).
+
+### Root cause (definitive, from local cold reproduction)
+
+The calico-node Ready gate shipped after #107 queried with `all_namespaces: true` +
+singular `label_selector`/`field_selector`. The pinned `kubernetes.core` **rejects those
+params outright** — standing module error on every attempt:
+`Unsupported parameters for (kubernetes.core.k8s_info) module: field_selector,
+label_selector` (and `all_namespaces`; supported params are the **plural**
+`label_selectors`/`field_selectors` + `namespace`). `failed_when: false` swallowed the arg
+error, so `resources` stayed empty for the entire 490 s window and the gate's named fail
+aborted the master chain **before profile creation** — starving both node gates. Timeline
+proof from the cold parallels resume (`converge_cold2_resume_20261115_102713.log`): the
+calico-node pod was created ~09:33 UTC and was Running/Ready while the gate (09:36–09:44
+UTC) polled zero pods. The same singular-param bug existed latently in the coredns
+pod-evidence task (`label_selector: "k8s-app=kube-dns"`) — it hard-fails when reached.
+This also explains warm run 2's master failure.
+
+Module-param probes (playbooks `probe_calico_query*.yml` against the live parallels
+cluster): singular/`all_namespaces` variants → `Unsupported parameters`; shipped shape
+`namespace: calico-system` + `label_selectors: [k8s-app=calico-node]` +
+`field_selectors: [spec.nodeName=<host>]` → `n=1`, Ready condition passes; coredns variant
+`namespace: kube-system` + `label_selectors: [k8s-app=kube-dns]` → `n=2`. The known-good
+precedent was already in-repo: `tasks/certs/calico-ca-recovery.yml` uses namespace + plural
+selectors.
+
+### Fix
+
+`tasks/kube-install.yml`: gate + pod-evidence queries switched to the supported param
+shape (`namespace:` + plural `label_selectors:`/`field_selectors:`, matching
+`calico-ca-recovery.yml`); gate named fail now self-reports the module error
+(`query error: {{ kube_calico_node_pods.msg | default('none') }}`) so a future param
+drift diagnoses itself instead of showing `pods: []`. Budgets raised to cover the measured
+cold-CI pull floor (>8 min incl. tigera-operator cold pull): `kube_calico_node_ready_retries`
+48→90 (~15 min) and `kube_join_profile_ready_retries` 120→180 (~30 min) so the master's
+worst-case pre-profile path (apply 6×10 s + gate 90×10 s + rollout 24×20 s + cert work
+~5 min ≈ 26–28 min) fits under the node gate ceiling. Ceilings, not floors — warm runs
+pass in seconds.
+
+Guards (`molecule/default/tests/test_master.py`): gate guard now pins
+`namespace: calico-system` + plural params and **bans** singular `label_selector:`/
+`field_selector:` and `all_namespaces:` in both blocks (the exact bug class); coredns guard
+carries the same ban for its evidence query. Revert-detection proven by injection: adding
+back a singular param (gate) or `all_namespaces:` (coredns block) flips the respective
+guard to FAIL with the bug-class message; restored file passes both.
+
+### Local regression — param fix (2026-11-15, parallels): PASSED
+
+- `converge-paramfix` (resume on healthy cluster): OK 655 s, RECAP
+  `master ok=471 failed=0 rescued=5` (the 5 = by-design keytab-probe rescues),
+  `node1/node2 ok=175 failed=0` — calico gate passed with the fixed query, both nodes
+  joined, profile created.
+- `verify-monorepo`: **76/76 passed** (38.6 s) — all nodes Ready, per-pod evidence, PV
+  mounts, cert chain, renewal timers.
+- Reconverge (idempotence): OK 564 s, RECAP `failed=0 rescued=0` on all hosts, **zero
+  fatal lines** — warm gate passes in seconds as designed.
+- Post-reconverge `verify-monorepo`: green (73 s).
+- `tox -e lint`: production profile, 0 failures 0 warnings (102 files).
+- Logs: `converge_paramfix_20261115_111350.log`, `verify_paramfix_20261115_112457.log`,
+  `converge_paramfix_reconverge_20261115_112627.log`.
+
+## Build #109 post-mortem (commit `6de7461` — PR #24 merge of `f4f44a5`, job 641606168 — FAILED, 94 min)
+
+Timeline note: at 09:57+0100 the repo owner committed the then-working set as `f4f44a5`
+("chore: add some additional logs for ci") — this included the calico-node gate **with its
+original broken query params** (the param fix was still uncommitted here) — and merged
+`parallel` into `master` via PR #24 (`6de7461`), triggering build #109. So #109 was, in
+effect, the CI exposure of the fifth bucket.
+
+**CI confirmed the #108 root cause verbatim** (`travis_109.log`, ANSI-stripped, 9654 lines):
+
+- Line 8106: the calico-node gate's poll ended with `attempts: 48` and the standing module
+  error `Unsupported parameters for (kubernetes.core.k8s_info) module: all_namespaces,
+  field_selector, label_selector. Supported parameters include: … field_selectors …
+  label_selectors … namespace …`, swallowed by `failed_when: false`
+  (`failed_when_suppressed_exception` present, task reported `ok`).
+- Lines 8108–8119: the gate's named fail then fired exactly as designed —
+  `calico-node pod on this node never became Ready within 490 s (last pods: [], phases [],
+  container states [])` — aborting the master chain before profile creation.
+- Node1 reached the join phase and sat in the `kubernetesNodes` profile gate when the
+  **90-minute `travis_wait` cap killed the build** (`duration=5400498786410` ns ≈ 90 min;
+  `Your build exited with 1`). The join-scale gate ceiling must therefore stay compatible
+  with the 90 min total (the 180 x 10 s ceiling, entered at ~45 min on the CI cold path,
+  fits).
+
+**Same bug class found and fixed in `tasks/drain-and-reset.yml`** (log line 6429, both
+#108 and #109): the drain task passed `force`/`ignore_daemonsets`/`delete_emptydir_data`/
+`terminate_grace_period` flat, which `kubernetes.core.k8s_drain` rejects
+(`Unsupported parameters … Supported parameters include: … delete_options …`), and
+`failed_when: false` swallowed it — drain silently no-opped on the reset path. Fix: the four
+flags nested under the module-supported `delete_options:`. Live probe
+(`probe_drain_shape.yml`, dummy node name): `unsupported-param-error=False`,
+`msg=Node probe-does-not-exist not found.` — params accepted, no cluster side effect. Full
+audit of both logs confirms exactly these two unsupported-parameter sites existed.
+
+**#108 state anomaly resolved**: job 641604415 now reports `state: failed`,
+`started_at 2026-11-14T23:09:15Z`, `finished_at 2026-11-15T00:42:04Z`, `restarted_at: None`
+— it was never restarted; the transient `passed` reading was an API artifact. #108 stands
+FAILED as recorded.
+
+### CI delivery — build #110 (run #1 toward the two-green exit criterion)
+
+_Pending: param-fix + drain-fix commit pushed after this record; build URL to be appended
+on dispatch._

@@ -14,7 +14,8 @@ genuinely did not exist during the node's 271 s window while the master stayed a
 
 - [x] 2.1 Give the profile gate its own join-scale budget. New defaults
       `kube_join_profile_ready_retries: 120` / `kube_join_profile_ready_delay: 10`
-      (~20 min ceiling, ≥ 2× the measured CI worst case), consumed by
+      (~20 min ceiling, ≥ 2× the measured CI worst case; recomputed to 180 by 2.6 once the
+      master's worst-case pre-profile path was measured), consumed by
       `Kube-install-join | wait for kubernetesNodes profile to exist in FreeIPA`
       (`tasks/kube-install-join-node.yml:39`) instead of the generic
       `orchestration_readiness_retries/delay` pair, which stays for the other gates.
@@ -64,6 +65,44 @@ genuinely did not exist during the node's 271 s window while the master stayed a
       cluster green (`failed=0 rescued=0` all hosts, 572 s — the named-fail tasks after both
       loops would set `failed=1` on exhaustion, so the green RECAP proves apply + rollout
       poll both succeeded), `verify-monorepo` 75/75 (74 + the new static guard) in 37.6 s.**
+- [x] 2.6 Gate the coredns restart on this node's calico-node pod being Ready, and repair
+       the gate's own query (fifth bucket, opened by build #108 + local cold reproduction):
+       the tcharl.kubernetes role applies the Tigera Installation and returns without waiting
+       for calico-node, so on cold CI runners (image pull >8 min incl. the tigera-operator
+       cold pull) CNI never initialized and all 24 rollout polls observed
+       `unavailableReplicas: 3`. The gate added after #107 was itself broken: the pinned
+       `kubernetes.core` rejects `all_namespaces` and the singular `label_selector`/
+       `field_selector` (standing "Unsupported parameters" module error), and `failed_when:
+       false` swallowed it — the gate polled an empty list for its whole window and its named
+       fail killed the master chain before profile creation (see `evidence.md` #108
+       post-mortem; live timeline proof: calico-node pod Running/Ready while the gate polled
+       zero pods). Fix: (a) gate query switched to the collection-supported shape —
+       `namespace: calico-system` + plural `label_selectors`/`field_selectors`, matching the
+       known-good precedent in `tasks/certs/calico-ca-recovery.yml`; same fix for the
+       coredns pod-evidence query (singular `label_selector` there was latently fatal);
+       (b) the gate's named fail self-reports the module error (`query error: …`) so a future
+       param drift diagnoses itself instead of showing `pods: []`; (c) budgets sized to the
+       measured CI floor: `kube_calico_node_ready_retries` 48→90 (~15 min) and
+       `kube_join_profile_ready_retries` 120→180 (2.1's ceiling recomputed for the master's
+       worst-case pre-profile path: apply 6×10 s + gate 90×10 s + rollout 24×20 s + cert work
+       ~5 min ≈ 26–28 min). Ceilings, not floors. Verification: structural guard
+       `test_calico_node_gate_precedes_coredns_restart` pins `namespace: calico-system` +
+       plural params + self-reported query error and **bans** the singular/`all_namespaces`
+       forms in both blocks (revert-detection proven by injection, both directions); live
+       probe of the shipped query shape against the parallels cluster returns the Ready pod;
+       full local cycle green (converge → verify 76/76 → reconverge `failed=0 rescued=0` →
+       re-verify); CI confirmation folds into 4.2. **Implemented 2026-11-15; all local
+       verifications PASSED, records in `evidence.md`.**
+- [x] 2.7 Repair the second swallowed unsupported-parameter site found by the CI logs
+       (build #109 line 6429, also present in #108): `tasks/drain-and-reset.yml` passed
+       `force`/`ignore_daemonsets`/`delete_emptydir_data`/`terminate_grace_period` flat to
+       `kubernetes.core.k8s_drain`, which rejects them (supported: `delete_options`) — and
+       `failed_when: false` swallowed the module error, so the reset-path drain silently
+       no-opped. Fix: nest the four flags under `delete_options:` (same param-discipline
+       class as 2.6). Verification: live probe (`probe_drain_shape.yml`, nonexistent node
+       name) shows the module accepts the shape (`Node … not found`, no
+       `Unsupported parameters`); full audit of `travis_108.log` + `travis_109.log`
+       confirms no other unsupported-parameter sites. **Implemented 2026-11-15.**
 
 ## 3. Join hardening (unconditional)
 
@@ -75,7 +114,7 @@ genuinely did not exist during the node's 271 s window while the master stayed a
 ## 4. Verification
 
 - [x] 4.1 Full local cycle on the host-OS-matched scenario: `destroy → converge-monorepo → verify-monorepo` (parallels) plus a reconverge for idempotence. Verification: verify green (all nodes Ready, per-pod evidence, PV mounts) and reconverge reports no unexpected changes. **PASSED 2026-11-14 — both the warm run (converge 664 s + verify 74/74) and the formal cold-path protocol `destroy → converge (1850 s, fresh VMs + prepare) → verify (74/74) → reconverge (642 s, failed=0, rescued=0) → re-verify (74/74)` green end to end; PLAY RECAPs and verdicts in `evidence.md`. Reconverge `changed` residue is the pre-existing containerd-restart → kubelet-restart-handler chain only; the join path itself reported zero changes.**
-- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`. **Status: build #107 (`f1ff4f5`, job 641604072) FAILED at the coredns 504 (see 2.5 + `evidence.md` #107 post-mortem) — the join fix itself behaved exactly as designed. Coredns hardening shipped in `d869e70` (pushed to `parallel` and fast-forwarded to `master` 2026-11-15); build #108 (`d869e709`, job 641604415) started 23:09Z on master. Two consecutive greens must be on the hardened commit — #108 is run #1; on green, same-commit restart gives run #2.**
+- [ ] 4.2 Push for Travis kvm and confirm **two consecutive green kvm runs** on the fixed commit (this change's exit criterion). Verification: two green job URLs recorded in `evidence.md`. **Status: #107 failed at the coredns 504 (fixed by 2.5); #108 (`d869e709`) proved 2.5 as designed but failed at the fifth bucket — the broken calico-node gate query (fixed by 2.6); #109 (`6de7461`, PR #24 merge of the pre-fix `f4f44a5`) was CI-exposure of the fifth bucket — the gate's `Unsupported parameters` module error confirmed verbatim, master chain killed before profile creation, build then hit the 90-min `travis_wait` cap (see `evidence.md` #109 post-mortem; it also exposed the drain param site, fixed by 2.7). The two consecutive greens must be on the 2.6+2.7 commit: push → build is run #1; on green, same-commit restart gives run #2. Build URLs to be appended in `evidence.md` as they run.**
 - [x] 4.3 Structural test in `molecule/default/tests/test_node.py`: assert the join rescue references `kube_join_started_at`, `journalctl --since`, `crictl`, `ipa-getcert`, and the upstream attribution string. Verification: test passes locally (4.1) and fails if the rescue is reverted. **PASSED 2026-11-14 in the 74-test verify run (`test_join_rescue_carries_phase_diagnostics`); kvm symlink set covers `test_node.py` so the guard runs on CI too.**
 
 ## Workflow follow-up

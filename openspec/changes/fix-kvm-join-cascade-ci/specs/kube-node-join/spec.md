@@ -58,3 +58,20 @@ The master bring-up task that patches cluster state the node join gates depend o
 - **WHEN** the coredns patch apply or the rollout wait exhausts its budget without success
 - **THEN** the failure names the phase (annotation apply vs rollout wait), the last API observation, and the upstream cause (calico bring-up / API-server health)
 - **THEN** the failure is not an anonymous until-loop exhaustion and the run does not proceed with broken cluster DNS
+
+### Requirement: Coredns restart is gated on this node's CNI readiness using supported module parameters
+Before the post-calico coredns restart, the master SHALL wait, within a bounded budget, for its own `calico-node` pod to be Ready, so the restart is not launched into a node whose CNI has not initialized. The readiness query SHALL use only parameters supported by the pinned `kubernetes.core` collection, and its failure output SHALL include the module's own error when the query itself failed.
+
+#### Scenario: Cold image pull delays CNI on a constrained runner
+- **WHEN** the calico-node image pull (including the tigera-operator cold pull) takes minutes on a cold CI runner before the pod becomes Ready
+- **THEN** the gate waits up to its configured ceiling and the coredns restart proceeds once this node's calico-node is Ready
+- **THEN** healthy or warm runs pass the gate as soon as the pod is Ready (ceiling, not floor)
+
+#### Scenario: Broken readiness query self-reports instead of polling empty
+- **WHEN** the readiness query fails at the module level (e.g. unsupported parameter names) instead of returning pods
+- **THEN** the named fail output carries the module error alongside the pod/phases/container-state evidence, making the query bug distinguishable from a genuine CNI failure in the log alone
+
+#### Scenario: Gate query matches where the operator actually places calico-node
+- **WHEN** the gate evaluates this node's calico-node pod
+- **THEN** the query is scoped to the namespace the tigera-operator deploys calico-node into (`calico-system`) with label and `spec.nodeName` selectors via the collection-supported plural parameters, and a kube-system-scoped or unsupported-parameter query is a guard-detected regression
+- **THEN** the combined calico-gate and rollout-wait budgets stay within the node join profile-gate ceiling, so the master's pre-profile waits cannot starve the gate they feed
