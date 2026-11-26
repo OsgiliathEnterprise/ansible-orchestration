@@ -82,18 +82,12 @@
 - name: Ipa-certs | fetch CA certificates from IPA (delegated shuttle, design D1)
   block:
     - name: Ipa-certs | create root-only fetch directory on idm
-      # tempfile (state: directory) mint is unique but takes no mode parameter;
-      # the follow-up file task enforces the root-only 0700 explicitly.
-      ansible.builtin.tempfile:
-        state: directory
-        suffix: ca-fetch
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      register: ca_fetch_tmp
-
-    - name: Ipa-certs | enforce root-only mode on idm fetch directory
+      # Fixed volatile directory (tmpfs under /run) instead of a per-run tempfile
+      # mint: tempfile create + removal reported changed on every converge. The
+      # shuttle artifacts are public CA certificates; the directory is root-only
+      # and self-clears on reboot.
       ansible.builtin.file:
-        path: "{{ ca_fetch_tmp.path }}"
+        path: "{{ kube_idm_ca_fetch_dir }}"
         state: directory
         owner: root
         group: root
@@ -103,7 +97,7 @@
 
     - name: Ipa-certs | download ca from IPA to idm temp location
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out={{ ca_fetch_tmp.path }}/ca.crt.new
+        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out={{ kube_idm_ca_fetch_dir }}/ca.crt.new
       no_log: "{{ secure_logs }}"
       changed_when: false
       delegate_to: "{{ groups[idm_group] | first }}"
@@ -113,7 +107,7 @@
 
     - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA to idm temp location"
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ ca_fetch_tmp.path }}/ca.crt.kubeclusteradm
+        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_idm_ca_fetch_dir }}/ca.crt.kubeclusteradm
       no_log: "{{ secure_logs }}"
       changed_when: false
       delegate_to: "{{ groups[idm_group] | first }}"
@@ -123,26 +117,17 @@
 
     - name: "Ipa-certs | slurp kubernetes-ca (CA #1) from idm"
       ansible.builtin.slurp:
-        src: "{{ ca_fetch_tmp.path }}/ca.crt.new"
+        src: "{{ kube_idm_ca_fetch_dir }}/ca.crt.new"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: ca_fetch_ca1
 
     - name: "Ipa-certs | slurp kubeclusteradm CA (CA #2) from idm"
       ansible.builtin.slurp:
-        src: "{{ ca_fetch_tmp.path }}/ca.crt.kubeclusteradm"
+        src: "{{ kube_idm_ca_fetch_dir }}/ca.crt.kubeclusteradm"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: ca_fetch_ca2
-
-  always:
-    - name: Ipa-certs | remove idm fetch directory
-      ansible.builtin.file:
-        path: "{{ ca_fetch_tmp.path }}"
-        state: absent
-      delegate_to: "{{ groups[idm_group] | first }}"
-      become: true
-      when: ca_fetch_tmp is defined and ca_fetch_tmp.path is defined
 
 - name: "Ipa-certs | install kubernetes-ca (CA #1) from shuttle"
   ansible.builtin.copy:
@@ -296,17 +281,28 @@
   become: true
   when: kubeadm_ca_stat.stat.exists
 
+# The anchor is transient by design (ipa-pki-swap.yml sweeps it at the end of a
+# successful run, and test_master.py asserts its absence), so at steady state it
+# must not be rebuilt on every converge: recreate it only when the old-cert window
+# is actually open — the retained kubeadm CA still exists, or this run is swapping
+# the API serving certificate. At steady state the healthz gate below validates
+# directly against the merged bundle, which is then the API's only possible issuer.
+- name: Ipa-certs | decide whether the transient gate anchor is needed
+  ansible.builtin.set_fact:
+    kube_gate_anchor_needed: "{{ kubeadm_ca_stat.stat.exists or (apiserver_swap_needed | default(false) | bool) }}"
+
 - name: Ipa-certs | build gate anchor (retained kubeadm CA + merged bundle) for old-cert window
   ansible.builtin.copy:
     content: "{{ (gate_kubeadm_ca.content | default('')) | b64decode }}{{ ca_bundle_kubeclusteradm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
     dest: /tmp/kube-api-gate-anchor.crt
     mode: '0644'
   become: true
+  when: kube_gate_anchor_needed | bool
 
 - name: Ipa-certs | wait for API server to restart after static pod update (validated)
   ansible.builtin.uri:
     url: "https://{{ orchestration_master_ip }}:{{ orchestration_kube_port }}/healthz"
-    ca_path: /tmp/kube-api-gate-anchor.crt
+    ca_path: "{{ '/tmp/kube-api-gate-anchor.crt' if kube_gate_anchor_needed | bool else kubernetes_certificates_path + 'ca-bundle.crt' }}"
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"
@@ -331,6 +327,18 @@
     krb_ticket_keytab_path: /etc/krb5.keytab
     krb_ticket_cache_purpose: cert_enroll
 
+# Idempotence gate for the apiserver serving cert: the replacement pipeline below
+# (delete kubeadm cert/key/CSR -> re-enroll via ipacert -> touch the static pod
+# manifest) always re-issued. Decide from the on-disk serving cert: replay when it
+# is missing, not issued by CA #1 (the IPA kubernetes CA), or within the renewal
+# threshold. Mirrors the ipa-controller-manager-client.yml idiom.
+- name: Ipa-certs | decide whether the apiserver serving cert needs replacement
+  ansible.builtin.include_tasks: _cert_swap_decision.yml
+  vars:
+    cert_swap_cert_path: "{{ kubernetes_certificates_path }}apiserver.crt"
+    cert_swap_expected_issuer: "{{ ipa_kubernetes_ca_name }}"
+    cert_swap_decision_fact: apiserver_swap_needed
+
 - name: Ipa-certs | remove kubeadm apiserver cert so IPA-signed one is created
   ansible.builtin.file:
     path: "{{ item }}"
@@ -339,6 +347,7 @@
     - "{{ kubernetes_certificates_path }}apiserver.crt"
     - "{{ kubernetes_certificates_path }}apiserver.key"
     - "{{ kubernetes_certificates_path }}apiserver.csr"
+  when: apiserver_swap_needed
   become: true
 
 - name: Ipa-certs | create apiserver cert signed by IPA
@@ -378,6 +387,7 @@
     path: /etc/kubernetes/manifests/kube-apiserver.yaml
     mode: '0600'
     state: touch
+  when: apiserver_swap_needed
   become: true
 
 # Anchored to the IPA CA only: a still-stale serving cert must NOT pass — this gate asserts the

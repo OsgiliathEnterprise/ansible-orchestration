@@ -5,7 +5,13 @@
     name: geerlingguy.containerd
   vars:
     containerd_config_cgroup_driver_systemd: True
-    containerd_config_default_write: True
+    # Single writer: upstream must NOT render/copy /etc/containerd/config.toml
+    # (tasks/main.yml lines 25-62 are all gated on this flag). The file is owned
+    # exclusively by tasks/fix-requirements.yml, which renders the defaults and
+    # writes them content-idempotently. With write enabled, upstream rewrote the
+    # file every converge and fix-requirements rewrote it back — a permanent
+    # two-writer oscillation.
+    containerd_config_default_write: False
     ansible_become: True
     docker_yum_gpg_key: "{{ docker_gpg_key }}"
   notify: ansible-orchestration | refresh containerd

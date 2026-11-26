@@ -20,6 +20,29 @@
     idm_preferred_nic: "enp0s5"
     company_realm_password: '123ADMin'
     company_ad_password: '123ADmPass'
+  tasks:
+    # The freeipa_server role opens the firewall only at runtime (its
+    # tcharl.ansible_routing include lacks the dns service and freeipa-ldap,
+    # and nothing is written --permanent). A firewalld restart triggered by
+    # the dnf transactions during converge then wipes the runtime-only rules
+    # and the kube hosts lose the KDC/DNS ("Cannot contact any KDC").
+    # Pin the full IPA service set permanently so it survives restarts.
+    - name: "Make IPA/DNS firewall services permanent on IDM"
+      ansible.posix.firewalld:
+        service: "{{ item }}"
+        permanent: true
+        immediate: true
+        state: enabled
+      loop:
+        - dns
+        - freeipa-ldap
+        - freeipa-ldaps
+        - freeipa-replication
+        - kerberos
+        - kpasswd
+        - http
+        - https
+      become: true
 - name: Prepare secure the hosts
   hosts: kube_master,kube_node
   roles:

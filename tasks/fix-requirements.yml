@@ -1,43 +1,43 @@
 ---
+# Single writer for /etc/containerd/config.toml.
+#
+# The upstream geerlingguy.containerd writer is disabled via
+# containerd_config_default_write=False (snippet_containerd.yml): it used to
+# regenerate the file from `containerd config default` on every converge and
+# copy it to /etc, while this role patched it afterwards — a permanent
+# two-writer oscillation. This file now renders the default config once and
+# derives the desired content in memory with content-idempotent edits: the
+# final copy reports changed only when the derived content differs from what
+# is deployed.
+#
+# Earlier in-place patch tasks are replaced here (their semantics preserved):
+#  - enable_selinux = false -> true (RHEL SELinux-aware containerd)
+#  - disable_apparmor = false -> true (no apparmor on RHEL)
+#  - SystemdCgroup: previously the in-table 'SystemdCgroup = false' was
+#    commented out and a 'SystemdCgroup = true' line appended at EOF, which
+#    landed inside the trailing ocicrypt table and was silently ignored by
+#    containerd (crictl info showed no runc options). It is now set in place
+#    inside the runc.options table.
+#  - The sandbox_image replace task was a no-op relic: containerd 2.x renders
+#    the pause image as `sandbox = ...` under the cri plugin, so it was
+#    dropped.
 
-- name: Fix Requirements | Update containerd pause image
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    regexp: 'enable_selinux\s*=\s*false'
-    replace: 'enable_selinux = true'
+- name: Fix Requirements | Render default containerd configuration
+  ansible.builtin.command: containerd config default
+  register: containerd_default_config
+  changed_when: false
   become: True
 
-- name: Fix Requirements | Enable systemd cgroup
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    regexp: '^\s+SystemdCgroup\s*=\s*false'
-    replace: '# SystemdCgroup = false'
-  become: True
+- name: Fix Requirements | Derive desired containerd configuration
+  ansible.builtin.set_fact:
+    containerd_desired_config: "{{ containerd_default_config.stdout | regex_replace('(?m)^(\\s*)enable_selinux\\s*=\\s*false\\s*$', '\\1enable_selinux = true') | regex_replace('(?m)^(\\s*)disable_apparmor\\s*=\\s*false\\s*$', '\\1disable_apparmor = true') | regex_replace('(?m)^(\\s*)SystemdCgroup\\s*=\\s*false\\s*$', '\\1SystemdCgroup = true') }}"
 
-- name: Fix Requirements | Disable apparmor
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    regexp: '^\s+disable_apparmor\s*=\s*false'
-    replace: 'disable_apparmor = true'
+- name: Fix Requirements | Deploy containerd configuration
+  ansible.builtin.copy:
+    content: "{{ containerd_desired_config }}"
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
   become: True
-
-- name: Fix Requirements | Add systemd cgroup if line not present
-  ansible.builtin.lineinfile:
-    path: /etc/containerd/config.toml
-    regexp: 'SystemdCgroup\s=\strue'
-    insertafter: '\.containerd\.runtimes\.runc\.options'
-    line: "{{ 'SystemdCgroup = true' | indent(width=12, first=True) }}"
-  become: True
-
-- name: Fix Update containerd pause image
-  ansible.builtin.replace:
-    path: /etc/containerd/config.toml
-    regexp: 'sandbox_image\s*=\s*"registry\.k8s\.io\/pause:3\.8'
-    replace: 'sandbox_image = "registry.k8s.io/pause:3.10'
-  become: True
-
-- name: Fix Ensure containerd is started and enabled at boot.
-  ansible.builtin.service:
-    name: containerd
-    state: restarted
-  become: True
+  notify: ansible-orchestration | refresh containerd

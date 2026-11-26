@@ -1,10 +1,4 @@
 ---
-- name: Ipa-api-server | Check apiserver cert existence
-  ansible.builtin.stat:
-    path: "{{ kubernetes_certificates_path }}apiserver.crt"
-  register: orchestration_apiservercert
-  become: true
-
 - name: Ipa-api-server | configure http service
   freeipa.ansible_freeipa.ipaservice:
     ipaadmin_password: "{{ company_realm_password }}"
@@ -56,6 +50,7 @@
 - name: Ipa-api-server | create apiserver certs
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}apiserver.key"
+  when: apiserver_swap_needed | bool
   become: true
 
 - name: Ipa-api-server | create kube-apiserver csr
@@ -73,7 +68,7 @@
     extended_key_usage:
       - serverAuth
   when:
-   - not orchestration_apiservercert.stat.exists
+   - apiserver_swap_needed | bool
   become: true
 
 # The master owns this certificate's identity, so it authenticates the request
@@ -91,6 +86,7 @@
     certificate_out: "{{ kubernetes_certificates_path }}apiserver.crt"
     profile_id: kubeAdministrators
     state: requested
+  when: apiserver_swap_needed | bool
   no_log: "{{ secure_logs }}"
   become: true
   environment:

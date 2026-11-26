@@ -187,6 +187,16 @@
     - /tmp/kube-admin-enroll.csr
     - /tmp/kube-admin-enroll.crt
 
+- name: Admin-user | read current admin.conf client-certificate reference
+  # Read-only end-state probe (same jsonpath as the verify task below; it must
+  # descend through `.user`). Registers the value that gates the re-embed.
+  ansible.builtin.command: >-
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf config view --minify
+    -o jsonpath='{.users[?(@.name=="kubernetes-admin")].user.client-certificate}'
+  become: true
+  register: kube_admin_conf_cert_before
+  changed_when: false
+
 - name: Admin-user | patch admin.conf user entry with IPA-issued client certificate
   # Shell required: the kubernetes.core.k8s module cannot patch the kubeconfig file
   # in place (it manages API objects, not credential files). kubectl config is the
@@ -197,6 +207,11 @@
   # (`|| true`: absent on a hand-edited config). The kubeadm-generated admin.conf
   # user is `kubernetes-admin` and its context `kubernetes-admin@kubernetes` —
   # root's kubectl default, which this patch re-points at the IPA-issued pair.
+  # Idempotence: gated on the read-only probe above — the patch runs only when the
+  # user entry does not already reference the IPA-issued pair. The explicit
+  # changed_when mirrors the gate: whenever the task executes it really rewrites
+  # admin.conf, so change reporting is truthful rather than blanket-suppressed.
+  # It also replays after a re-issued kubeadm.crt or a reverted admin.conf.
   ansible.builtin.shell: |
     set -e
     kubectl config set-credentials kubernetes-admin --client-certificate="{{ kube_credential_folder }}/kubeadm.crt" --client-key="{{ kube_credential_folder }}/kubeadm.pem" --kubeconfig=/etc/kubernetes/admin.conf
@@ -204,7 +219,8 @@
     kubectl config unset kubernetes-admin.client-key-data --kubeconfig=/etc/kubernetes/admin.conf || true
     kubectl config use-context kubernetes-admin@kubernetes --kubeconfig=/etc/kubernetes/admin.conf
   become: true
-  changed_when: false
+  when: kube_admin_conf_cert_before.stdout != kube_credential_folder + '/kubeadm.crt'
+  changed_when: kube_admin_conf_cert_before.stdout != kube_credential_folder + '/kubeadm.crt'
 
 - name: Admin-user | verify admin.conf references the IPA-issued certificate
   # Read-only kubeconfig inspection (config view): changed_when: false is

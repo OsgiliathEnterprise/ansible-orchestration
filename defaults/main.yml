@@ -19,6 +19,10 @@ ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
 # kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
 # kubeclusteradm CA. See tasks/certs/ipa-kubeclusteradm-ca.yml.
 ipa_kubeclusteradm_ca_name: "kubeclusteradm"
+# CA #1 name (serving cert / trust anchor). Matches the literal ipa_ca_ensure_name
+# used by tasks/certs/ipa-kubernetes-ca.yml; used as the expected issuer by the
+# apiserver serving-cert idempotence gate in tasks/certs/ipa-certs.yml.
+ipa_kubernetes_ca_name: "kubernetes-ca"
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
 orchestration_kube_dns_ip: "10.96.0.10"
@@ -110,12 +114,21 @@ orchestration_kube_port: 6443
 # Kerberos identity and its purpose, never the calling task file — and is
 # pre-cleared before acquisition so a stale ticket can never be reused.
 kube_scratch_cache_dir: /run/krb5cc
+# Fixed root-only volatile directory used as the CA-fetch shuttle on idm
+# (tasks/certs/ipa-certs.yml). A stable path avoids the always-changed
+# tempfile create/delete pair of the previous implementation.
+kube_idm_ca_fetch_dir: /run/ipa-ca-fetch
 # Shared host ticket for the cert-enrollment phase (design D2): minted once by
 # tasks/certs/ipa-certs.yml through tasks/_krb_ticket.yml (principal host/<master>
 # -> slug host_master, purpose cert_enroll). The ipacert consumers in the five
 # master cert files inherit it via env: KRB5CCNAME instead of minting their
 # own per-file ticket.
 kube_cert_enroll_ccache: "{{ kube_scratch_cache_dir }}/host_master.cert_enroll.ccache"
+# Single source for the certificate renewal threshold (days). The converge-time
+# issuer/validity gates (_cert_swap_decision.yml and the *_swap_needed shell
+# reads) and the systemd kube-cert-renew timer both read this variable, so the
+# converge gate and the timer can never disagree on when a cert is "near expiry".
+kube_cert_renewal_threshold_days: 30
 # systemd StateDirectory of the kube-cert-renew unit: the unit-scoped ticket
 # cache (Environment=KRB5CCNAME=FILE:<dir>/ccache) and the master-side copy of
 # the kubeclusteradm renewal keytab live here — the timer never touches /tmp.
