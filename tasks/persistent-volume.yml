@@ -19,7 +19,7 @@
     path: /run/kube-nfs-pv
     state: directory
     mode: '0700'
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
 
 - name: Persistent-volume | render desired PV manifest
@@ -27,7 +27,7 @@
     src: persistent-volume.yml.j2
     dest: /run/kube-nfs-pv/pv.yml
     mode: '0600'
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
 
 - name: Persistent-volume | read back rendered PV manifest
@@ -35,7 +35,7 @@
   ansible.builtin.slurp:
     path: /run/kube-nfs-pv/pv.yml
   changed_when: false
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   register: persistent_volume_desired_slurp
 
@@ -54,7 +54,7 @@
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
   changed_when: false
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
   register: persistent_volume_live
 
@@ -86,7 +86,7 @@
 - name: Persistent-volume | recreate PersistentVolume (missing, drifted, or Released)
   when: pv_recreate_needed | bool
   become: true
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   block:
     - name: Persistent-volume | remove old PV if it exists (current name)
       # Same fact as the gate above: when a recreate is genuinely needed, the

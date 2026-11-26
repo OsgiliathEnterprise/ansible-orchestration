@@ -79,9 +79,9 @@
 - name: Kubernetes | Determine expected IPA DNS server
   ansible.builtin.set_fact:
     kube_expected_dns_ip: >-
-      {{ hostvars[groups['ipaservers'][0]].ansible_default_ipv4.address
-         | default(hostvars[groups['ipaservers'][0]].ansible_host | default(''))
-         if 'ipaservers' in groups and groups['ipaservers'] | length > 0
+      {{ hostvars[groups[idm_group][0]].ansible_default_ipv4.address
+         | default(hostvars[groups[idm_group][0]].ansible_host | default(''))
+         if idm_group in groups and groups[idm_group] | length > 0
          else '' }}
 
 - name: Kubernetes | Check systemd-resolved DNS servers
