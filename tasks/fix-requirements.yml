@@ -8,7 +8,11 @@
 # two-writer oscillation. This file now renders the default config once and
 # derives the desired content in memory with content-idempotent edits: the
 # final copy reports changed only when the derived content differs from what
-# is deployed.
+# is deployed. The meta: flush_handlers at the end of this file is load-bearing:
+# import_role/import_tasks do not flush handlers, so without it the restart
+# notified by the copy would only run at end of play — after kubeadm init/join
+# already talked to a daemon still running the pre-deploy configuration
+# (fresh-install [ERROR CRI] unknown service runtime.v1.RuntimeService).
 #
 # Earlier in-place patch tasks are replaced here (their semantics preserved):
 #  - enable_selinux = false -> true (RHEL SELinux-aware containerd)
@@ -41,3 +45,10 @@
     mode: '0644'
   become: True
   notify: ansible-orchestration | refresh containerd
+
+# Fire the notified restart now instead of at end of play: later tasks in this
+# play (CRI facts, kubeadm init/join) must talk to a daemon that already runs
+# the configuration deployed above. No-op in steady state (copy unchanged =>
+# no handler pending), so the all-changed=0 converge proof is unaffected.
+- name: Fix Requirements | flush containerd handlers
+  ansible.builtin.meta: flush_handlers
