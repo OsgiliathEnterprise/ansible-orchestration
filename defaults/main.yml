@@ -114,10 +114,6 @@ orchestration_kube_port: 6443
 # Kerberos identity and its purpose, never the calling task file — and is
 # pre-cleared before acquisition so a stale ticket can never be reused.
 kube_scratch_cache_dir: /run/krb5cc
-# Fixed root-only volatile directory used as the CA-fetch shuttle on idm
-# (tasks/certs/ipa-certs.yml). A stable path avoids the always-changed
-# tempfile create/delete pair of the previous implementation.
-kube_idm_ca_fetch_dir: /run/ipa-ca-fetch
 # Shared host ticket for the cert-enrollment phase (design D2): minted once by
 # tasks/certs/ipa-certs.yml through tasks/_krb_ticket.yml (principal host/<master>
 # -> slug host_master, purpose cert_enroll). The ipacert consumers in the five

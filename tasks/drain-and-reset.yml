@@ -11,10 +11,21 @@
   register: _helm_bin_stat
   become: Yes
 
+# Per-run tempdir shuttle for the helm download/extract: no fixed /tmp/helm-*
+# tarball or /tmp/linux-<arch>/ extraction dir, and no residue after install.
+# Every task in this set shares the helm-absent gate, so the always-changed
+# tempfile pair only executes on a real install (steady state: all skipped).
+- name: Drain-and-reset | mint per-run helm download directory
+  ansible.builtin.tempfile:
+    state: directory
+  register: _helm_tmp
+  become: Yes
+  when: not _helm_bin_stat.stat.exists
+
 - name: Drain-and-reset | download helm CLI tarball
   ansible.builtin.get_url:
     url: "https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
-    dest: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
+    dest: "{{ _helm_tmp.path }}/helm.tar.gz"
     mode: "0644"
   vars:
     helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
@@ -23,8 +34,8 @@
 
 - name: Drain-and-reset | extract helm CLI binary
   ansible.builtin.unarchive:
-    src: "/tmp/helm-{{ helm_version }}-linux-{{ helm_arch }}.tar.gz"
-    dest: /tmp
+    src: "{{ _helm_tmp.path }}/helm.tar.gz"
+    dest: "{{ _helm_tmp.path }}"
     remote_src: true
     include:
       - "linux-{{ helm_arch }}/helm"
@@ -35,7 +46,7 @@
 
 - name: Drain-and-reset | install helm CLI
   ansible.builtin.copy:
-    src: "/tmp/linux-{{ helm_arch }}/helm"
+    src: "{{ _helm_tmp.path }}/linux-{{ helm_arch }}/helm"
     dest: /usr/local/bin/helm
     remote_src: true
     mode: "0755"
@@ -43,6 +54,13 @@
     helm_arch: "{{ _arch_raw.stdout | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}"
   become: Yes
   when: not _helm_bin_stat.stat.exists
+
+- name: Drain-and-reset | remove the helm download directory
+  ansible.builtin.file:
+    path: "{{ _helm_tmp.path }}"
+    state: absent
+  become: Yes
+  when: not _helm_bin_stat.stat.exists and _helm_tmp.path is defined
 
 - name: Drain-and-reset | list all helm releases
   ansible.builtin.command: >-

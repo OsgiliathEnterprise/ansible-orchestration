@@ -168,7 +168,6 @@
   vars:
     ipa_ca_profile_id: kubeAdministrators
     ipa_ca_profile_desc: Kubernetes administration certificates
-    ipa_ca_profile_file: /tmp/ipa_default_ca_profile.cfg
     ipa_ca_profile_subject: "CN=$request.req_subject_name.cn$, O=system:masters"
     ipa_ca_profile_extra:
       - regexp: '^subjectAltName='
@@ -180,7 +179,6 @@
   vars:
     ipa_ca_profile_id: kubernetesNodes
     ipa_ca_profile_desc: Kubernetes worker-node client certificates
-    ipa_ca_profile_file: /tmp/ipa_node_ca_profile.cfg
     ipa_ca_profile_subject: "CN=system:node:$request.req_subject_name.cn$, O=system:nodes"
 
 - name: Ipa-kubernetes-ca | ensure kubeControllerManager profile
@@ -188,7 +186,6 @@
   vars:
     ipa_ca_profile_id: kubeControllerManager
     ipa_ca_profile_desc: Kubernetes controller-manager client certificate
-    ipa_ca_profile_file: /tmp/ipa_cm_ca_profile.cfg
     ipa_ca_profile_subject: "CN=system:kube-controller-manager, O=system:masters"
 
 - name: Ipa-kubernetes-ca | ensure kubeScheduler profile
@@ -196,7 +193,6 @@
   vars:
     ipa_ca_profile_id: kubeScheduler
     ipa_ca_profile_desc: Kubernetes scheduler client certificate
-    ipa_ca_profile_file: /tmp/ipa_scheduler_ca_profile.cfg
     ipa_ca_profile_subject: "CN=system:kube-scheduler, O=system:masters"
 
 - name: Ipa-kubernetes-ca | link profiles to the kubernetes-ca ca-acl

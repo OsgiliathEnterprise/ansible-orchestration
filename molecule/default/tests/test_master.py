@@ -342,10 +342,16 @@ def test_sa_key_exists_in_pki(host):
 
 def test_kubeadm_self_signed_ca_retired_from_master(host):
     """Design D5: after the swap no kubeadm self-signed CA artifact may remain on the
-    master — no retained cert, no private key, no transient gate anchor."""
+    master — no retained cert, no private key, no transient gate anchor. The anchor is
+    a run-scoped tempfile (prefix kube-api-gate-anchor-), so the residue check is
+    prefix-based rather than pinned to a fixed name."""
     assert not host.file("/etc/kubernetes/pki/ca.crt.kubeadm").exists
     assert not host.file("/etc/kubernetes/pki/ca.key").exists
-    assert not host.file("/tmp/kube-api-gate-anchor.crt").exists
+    with host.sudo():
+        anchor = host.run("ls -A /tmp | grep '^kube-api-gate-anchor-' || true")
+    assert anchor.stdout.strip() == "", (
+        "transient gate anchor residue in /tmp: " + anchor.stdout
+    )
 
 
 def test_kcm_cluster_signing_flags_emptied(host):

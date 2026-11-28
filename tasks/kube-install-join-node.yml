@@ -65,13 +65,29 @@
 
 
     # --- Trust anchor from FreeIPA (task 3.1): fetch CA from the IDM host, not master ---
+    # Per-run root-only tempdir on the shared idm host: concurrent joins each get
+    # their own shuttle, so identical fixed names can never collide or expose a
+    # partially written CA. This block only runs when the node has not joined
+    # (real transition), so the always-changed tempfile pair is truthful.
+    - name: Kube-install-join | mint per-run fetch directory on idm
+      # No mode parameter (tempfile has none): mkdtemp creates the directory
+      # root-owned 0700 by default.
+      ansible.builtin.tempfile:
+        state: directory
+      register: kube_node_ca_fetch_tmp
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
+
     # Bounded retry with content validation: the file must exist, be non-empty, and hold a
     # PEM header before we proceed (the master-side request/export races the fetch).
-    # no_log is off: stdout carries only public CA material / ipa CLI errors.
+    # changed_when: false is truthful here: the task is a readiness query strictly
+    # read-only against IPA state, writing only into the run-owned ephemeral dir
+    # (same class as the scratch ticket caches); the join block itself reports the
+    # real transition. no_log is off: stdout carries only public CA material / ipa CLI errors.
     - name: Kube-install-join | fetch CA cert from FreeIPA (delegated to idm)
       ansible.builtin.shell: |
-        ipa ca-show kubernetes-ca --certificate-out=/tmp/kube-node-ca.crt || true
-        grep -q 'BEGIN CERTIFICATE' /tmp/kube-node-ca.crt
+        ipa ca-show kubernetes-ca --certificate-out={{ kube_node_ca_fetch_tmp.path }}/ca.crt || true
+        grep -q 'BEGIN CERTIFICATE' {{ kube_node_ca_fetch_tmp.path }}/ca.crt
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
@@ -90,7 +106,7 @@
       ansible.builtin.fail:
         msg: >-
           CA_FETCH_TIMEOUT: CA 'kubernetes-ca' never materialised as valid PEM at
-          /tmp/kube-node-ca.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
+          {{ kube_node_ca_fetch_tmp.path }}/ca.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
           Last ipa output: {{ ca_fetch.stdout | default('') | truncate(400) }}
           {{ ca_fetch.stderr | default('') | truncate(400) }}
           Upstream dependencies: master certificate provisioning (tasks/certs/ipa-certs.yml)
@@ -99,7 +115,7 @@
 
     - name: Kube-install-join | slurp CA cert from idm
       ansible.builtin.slurp:
-        src: /tmp/kube-node-ca.crt
+        src: "{{ kube_node_ca_fetch_tmp.path }}/ca.crt"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: kube_ca_crt
@@ -110,8 +126,8 @@
     # are proxied to the kubelet and rejected with 401 Unauthorized.
     - name: Kube-install-join | fetch kubeclusteradm CA cert from FreeIPA (delegated to idm)
       ansible.builtin.shell: |
-        ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out=/tmp/kube-node-ca-clusteradm.crt || true
-        grep -q 'BEGIN CERTIFICATE' /tmp/kube-node-ca-clusteradm.crt
+        ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_node_ca_fetch_tmp.path }}/ca-clusteradm.crt || true
+        grep -q 'BEGIN CERTIFICATE' {{ kube_node_ca_fetch_tmp.path }}/ca-clusteradm.crt
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       changed_when: false
@@ -129,7 +145,7 @@
       ansible.builtin.fail:
         msg: >-
           CA_FETCH_TIMEOUT: CA '{{ ipa_kubeclusteradm_ca_name }}' never materialised as valid PEM at
-          /tmp/kube-node-ca-clusteradm.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
+          {{ kube_node_ca_fetch_tmp.path }}/ca-clusteradm.crt on {{ groups[idm_group] | first }} (5 x 5 s exhausted).
           Last ipa output: {{ ca_clusteradm_fetch.stdout | default('') | truncate(400) }}
           {{ ca_clusteradm_fetch.stderr | default('') | truncate(400) }}
           Upstream dependencies: master certificate provisioning (tasks/certs/ipa-certs.yml)
@@ -138,10 +154,19 @@
 
     - name: Kube-install-join | slurp kubeclusteradm CA cert from idm
       ansible.builtin.slurp:
-        src: /tmp/kube-node-ca-clusteradm.crt
+        src: "{{ kube_node_ca_fetch_tmp.path }}/ca-clusteradm.crt"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: kube_ca_clusteradm_crt
+
+    # Both fetches are consumed by the slurps above; the run-owned shuttle leaves
+    # no residue on the shared idm host.
+    - name: Kube-install-join | remove the run fetch directory from idm
+      ansible.builtin.file:
+        path: "{{ kube_node_ca_fetch_tmp.path }}"
+        state: absent
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
 
     - name: Kube-install-join | create pki directory on node
       ansible.builtin.file:
@@ -166,17 +191,28 @@
 
     # --- Gate: verify installed CA content matches the fresh fetch (task 3.2) ---
     # A stale anchor from a previous run must not pass the API readiness check with an old trust anchor.
+    # Per-run tempfile (not a fixed /tmp name): this block only runs on a real join, so the
+    # always-changed pair is truthful and the comparison file leaves no residue.
+    - name: Kube-install-join | mint temp file for the expected CA comparison
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .crt
+      register: kube_node_ca_expected_tmp
+      become: true
+
     - name: Kube-install-join | write expected CA to temp file for comparison
       ansible.builtin.copy:
         content: "{{ kube_ca_crt.content | b64decode }}"
-        dest: /tmp/kube-node-ca-expected.crt
+        dest: "{{ kube_node_ca_expected_tmp.path }}"
         mode: '0644'
       become: true
 
     - name: Kube-install-join | wait for CA cert content to match fresh fetch
+      # The loop re-reads the INSTALLED file each pass (a concurrent remap is the
+      # race it guards); the comparison target is the run-owned temp file above.
       ansible.builtin.shell: |
         set -o pipefail
-        diff -q /etc/kubernetes/pki/ca.crt /tmp/kube-node-ca-expected.crt > /dev/null && echo "MATCH" || echo "MISMATCH"
+        diff -q /etc/kubernetes/pki/ca.crt {{ kube_node_ca_expected_tmp.path }} > /dev/null && echo "MATCH" || echo "MISMATCH"
       become: true
       changed_when: false
       retries: "{{ orchestration_readiness_retries }}"
@@ -186,7 +222,7 @@
 
     - name: Kube-install-join | remove temp CA comparison file
       ansible.builtin.file:
-        path: /tmp/kube-node-ca-expected.crt
+        path: "{{ kube_node_ca_expected_tmp.path }}"
         state: absent
       become: true
 

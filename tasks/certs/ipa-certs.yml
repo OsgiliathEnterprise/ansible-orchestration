@@ -63,13 +63,15 @@
 - name: Ipa-certs | apply CA ACL host grants before any self-enrollment
   ansible.builtin.include_tasks: ipa-ca-acl-prejoin.yml
 
-# CA downloads run as admin ON idm (design D1): both `ipa ca-show
-# --certificate-out` consumers execute delegated to the FreeIPA server, and
-# only the fetched certificate bytes are shuttled to the master via slurp +
-# copy: content. The realm admin password never reaches a kube host — the
-# ticket is minted idm-local through the shared include (D4: pre-cleared
-# scratch cache, changed_when: false; no_log derived from secure_logs). The
-# fingerprint verification below stays master-local: it reads the installed
+# CA downloads run as admin ON idm (design D1): the shuttle executes delegated
+# to the FreeIPA server and only the fetched certificate bytes are shuttled to
+# the master via slurp + copy: content. The realm admin password never reaches
+# a kube host — the ticket is minted idm-local through the shared include (D4:
+# pre-cleared scratch cache, changed_when: false; no_log derived from
+# secure_logs). The shuttle is drift-gated (probes below) and mints a per-run
+# root-only tempfile directory on idm — no fixed folder, so concurrent fetches
+# on the shared idm host can never collide and steady state never touches it.
+# The fingerprint verification below stays master-local: it reads the installed
 # file and needs no ticket.
 - name: Ipa-certs | acquire admin ticket into scratch cache (idm-local)
   ansible.builtin.include_tasks: ../_krb_ticket.yml
@@ -79,37 +81,109 @@
     krb_ticket_password: "{{ company_realm_password }}"
     krb_ticket_delegate_to: "{{ groups[idm_group] | first }}"
 
-- name: Ipa-certs | fetch CA certificates from IPA (delegated shuttle, design D1)
+# Legacy sweep: /run/ipa-ca-fetch was the fixed shuttle directory of an earlier
+# implementation (default kube_idm_ca_fetch_dir, since removed). state: absent
+# is idempotent by construction — it reports changed only on the first pass
+# that actually removes the residue (same policy as the /tmp/kubeclusteradm
+# .keytab sweep in ipa-cert-renewal.yml).
+- name: Ipa-certs | sweep legacy fixed CA-fetch directory on idm
+  ansible.builtin.file:
+    path: /run/ipa-ca-fetch
+    state: absent
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+
+# Drift gate: fetch only when an installed copy is missing or its SHA-256
+# fingerprint differs from the IPA-published CA. Both probes are read-only
+# against IPA/master state (the published side writes only a shell-local
+# mktemp scratch removed on exit, same class as the scratch ticket caches),
+# so the blanket changed_when: false is truthful per the AGENTS policy;
+# x509_certificate_info exposes certificate fields, not fingerprints, so the
+# comparison follows the openssl idiom of the verify task below — both sides
+# run the identical normalization and the strings are directly comparable. A
+# probe failure (rc != 0) deliberately fails the task: silently treating a
+# broken probe as "drift" would reopen the always-fetch path this gate removes.
+- name: Ipa-certs | stat installed CA copies (fetch drift gate)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ kubernetes_certificates_path }}ca.crt.new"
+    - "{{ kubernetes_certificates_path }}ca.crt.kubeclusteradm"
+  register: kube_ca_installed_stat
+  become: true
+
+- name: Ipa-certs | read installed CA fingerprints (fetch drift gate)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    openssl x509 -in {{ item.item }} -noout -fingerprint -sha256 2>/dev/null | tr -d ':' | tr '[:upper:]' '[:lower:]' | sed 's/sha256 fingerprint=//'
+  loop: "{{ kube_ca_installed_stat.results }}"
+  when: item.stat.exists
+  register: kube_ca_installed_fp
+  changed_when: false
+  become: true
+
+- name: Ipa-certs | read published CA fingerprints from IPA (fetch drift gate)
+  # Shell exception (no chain/fingerprint module covers this; see AGENTS table).
+  # `ipa ca-show` emits PEM only via --certificate-out — plain and --raw stdout
+  # print a labelled base64 DER attribute that openssl cannot parse — so the
+  # probe exports to a shell-local mktemp scratch (0600, trap-removed on exit)
+  # and fingerprints that, using the same proven PEM path as the fetch below.
+  # The CLI also prints the entry's attributes to stdout even with
+  # --certificate-out: silence it (>/dev/null) so the registered stdout holds
+  # ONLY the normalized fingerprint, comparable to the installed side.
+  ansible.builtin.shell: |
+    set -euo pipefail
+    f="$(mktemp --suffix=.crt)"
+    trap 'rm -f "$f"' EXIT
+    ipa ca-show {{ item }} --certificate-out="$f" >/dev/null
+    openssl x509 -in "$f" -noout -fingerprint -sha256 | tr -d ':' | tr '[:upper:]' '[:lower:]' | sed 's/sha256 fingerprint=//'
+  loop:
+    - "{{ ipa_kubernetes_ca_name }}"
+    - "{{ ipa_kubeclusteradm_ca_name }}"
+  register: kube_ca_published_fp
+  changed_when: false
+  no_log: "{{ secure_logs }}"
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  environment:
+    KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_download.ccache"
+
+- name: Ipa-certs | decide whether the CA fetch shuttle must run
+  # A missing installed copy yields '' for that entry (item skipped above),
+  # which never equals the published hex digest — absence is drift.
+  ansible.builtin.set_fact:
+    kube_ca_fetch_needed: "{{ (kube_ca_installed_fp.results | default([]) | map(attribute='stdout', default='') | map('trim') | list) != (kube_ca_published_fp.results | map(attribute='stdout') | map('trim') | list) }}"
+
+- name: Ipa-certs | fetch CA certificates from IPA (gated per-run tempfile shuttle, design D1)
+  when: kube_ca_fetch_needed | bool
   block:
-    - name: Ipa-certs | create root-only fetch directory on idm
-      # Fixed volatile directory (tmpfs under /run) instead of a per-run tempfile
-      # mint: tempfile create + removal reported changed on every converge. The
-      # shuttle artifacts are public CA certificates; the directory is root-only
-      # and self-clears on reboot.
-      ansible.builtin.file:
-        path: "{{ kube_idm_ca_fetch_dir }}"
+    - name: Ipa-certs | mint per-run root-only fetch directory on idm
+      # Tempfile is always-changed by nature — acceptable inside this gate:
+      # executing the block IS a real transition (missing or drifted CA), and
+      # steady state never mints it (zero tempfile tasks on a no-op reconverge).
+      # No mode parameter (tempfile has none): mkdtemp creates the directory
+      # root-owned 0700 by default.
+      ansible.builtin.tempfile:
         state: directory
-        owner: root
-        group: root
-        mode: '0700'
+      register: kube_ca_fetch_tmp
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
 
-    - name: Ipa-certs | download ca from IPA to idm temp location
+    - name: Ipa-certs | download ca from IPA to the run fetch directory
+      # No changed_when override: the block runs only on drift, so the shell's
+      # own changed report is truthful.
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show kubernetes-ca --certificate-out={{ kube_idm_ca_fetch_dir }}/ca.crt.new
+        set -o pipefail && ipa ca-show {{ ipa_kubernetes_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.new
       no_log: "{{ secure_logs }}"
-      changed_when: false
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       environment:
         KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_download.ccache"
 
-    - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA to idm temp location"
+    - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA to the run fetch directory"
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_idm_ca_fetch_dir }}/ca.crt.kubeclusteradm
+        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.kubeclusteradm
       no_log: "{{ secure_logs }}"
-      changed_when: false
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       environment:
@@ -117,35 +191,42 @@
 
     - name: "Ipa-certs | slurp kubernetes-ca (CA #1) from idm"
       ansible.builtin.slurp:
-        src: "{{ kube_idm_ca_fetch_dir }}/ca.crt.new"
+        src: "{{ kube_ca_fetch_tmp.path }}/ca.crt.new"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: ca_fetch_ca1
 
     - name: "Ipa-certs | slurp kubeclusteradm CA (CA #2) from idm"
       ansible.builtin.slurp:
-        src: "{{ kube_idm_ca_fetch_dir }}/ca.crt.kubeclusteradm"
+        src: "{{ kube_ca_fetch_tmp.path }}/ca.crt.kubeclusteradm"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       register: ca_fetch_ca2
 
-- name: "Ipa-certs | install kubernetes-ca (CA #1) from shuttle"
-  ansible.builtin.copy:
-    content: "{{ ca_fetch_ca1.content | b64decode }}"
-    dest: "{{ kubernetes_certificates_path }}ca.crt.new"
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
+    - name: "Ipa-certs | install kubernetes-ca (CA #1) from shuttle"
+      ansible.builtin.copy:
+        content: "{{ ca_fetch_ca1.content | b64decode }}"
+        dest: "{{ kubernetes_certificates_path }}ca.crt.new"
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
 
-- name: "Ipa-certs | install kubeclusteradm CA (CA #2) from shuttle"
-  ansible.builtin.copy:
-    content: "{{ ca_fetch_ca2.content | b64decode }}"
-    dest: "{{ kubernetes_certificates_path }}ca.crt.kubeclusteradm"
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
+    - name: "Ipa-certs | install kubeclusteradm CA (CA #2) from shuttle"
+      ansible.builtin.copy:
+        content: "{{ ca_fetch_ca2.content | b64decode }}"
+        dest: "{{ kubernetes_certificates_path }}ca.crt.kubeclusteradm"
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+    - name: Ipa-certs | remove the run fetch directory on idm
+      ansible.builtin.file:
+        path: "{{ kube_ca_fetch_tmp.path }}"
+        state: absent
+      delegate_to: "{{ groups[idm_group] | first }}"
+      become: true
 
 - name: Ipa-certs | verify ca.crt.new fingerprint matches expected IPA CA
   ansible.builtin.shell: |
@@ -282,27 +363,41 @@
   when: kubeadm_ca_stat.stat.exists
 
 # The anchor is transient by design (ipa-pki-swap.yml sweeps it at the end of a
-# successful run, and test_master.py asserts its absence), so at steady state it
-# must not be rebuilt on every converge: recreate it only when the old-cert window
-# is actually open — the retained kubeadm CA still exists, or this run is swapping
-# the API serving certificate. At steady state the healthz gate below validates
-# directly against the merged bundle, which is then the API's only possible issuer.
+# successful run, and test_master.py asserts the absence of its prefix), so at
+# steady state it must not be rebuilt on every converge: mint and write it only
+# when the old-cert window is actually open — the retained kubeadm CA still
+# exists, or this run is swapping the API serving certificate. A per-run
+# tempfile (kube-api-gate-anchor-XXXXXX.crt) instead of a fixed /tmp name: the
+# mint is always-changed, which is truthful only inside this gate, and the
+# generated name removes any fixed-path residue/collision between runs. At
+# steady state the healthz gate below validates directly against the merged
+# bundle, which is then the API's only possible issuer.
 - name: Ipa-certs | decide whether the transient gate anchor is needed
   ansible.builtin.set_fact:
     kube_gate_anchor_needed: "{{ kubeadm_ca_stat.stat.exists or (apiserver_swap_needed | default(false) | bool) }}"
 
 - name: Ipa-certs | build gate anchor (retained kubeadm CA + merged bundle) for old-cert window
-  ansible.builtin.copy:
-    content: "{{ (gate_kubeadm_ca.content | default('')) | b64decode }}{{ ca_bundle_kubeclusteradm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
-    dest: /tmp/kube-api-gate-anchor.crt
-    mode: '0644'
-  become: true
   when: kube_gate_anchor_needed | bool
+  block:
+    - name: Ipa-certs | mint gate anchor tempfile for the old-cert window
+      ansible.builtin.tempfile:
+        state: file
+        prefix: kube-api-gate-anchor-
+        suffix: .crt
+      register: kube_gate_anchor_tmp
+      become: true
+
+    - name: Ipa-certs | write gate anchor content (retained kubeadm CA + merged bundle)
+      ansible.builtin.copy:
+        content: "{{ (gate_kubeadm_ca.content | default('')) | b64decode }}{{ ca_bundle_kubeclusteradm.content | b64decode }}{{ ca_bundle_ipa.content | b64decode }}"
+        dest: "{{ kube_gate_anchor_tmp.path }}"
+        mode: '0644'
+      become: true
 
 - name: Ipa-certs | wait for API server to restart after static pod update (validated)
   ansible.builtin.uri:
     url: "https://{{ orchestration_master_ip }}:{{ orchestration_kube_port }}/healthz"
-    ca_path: "{{ '/tmp/kube-api-gate-anchor.crt' if kube_gate_anchor_needed | bool else kubernetes_certificates_path + 'ca-bundle.crt' }}"
+    ca_path: "{{ kube_gate_anchor_tmp.path if (kube_gate_anchor_tmp is defined and kube_gate_anchor_tmp is not skipped and kube_gate_anchor_tmp.path is defined) else kubernetes_certificates_path + 'ca-bundle.crt' }}"
     status_code: 200
   become: true
   retries: "{{ kubernetes_api_ready_retries }}"

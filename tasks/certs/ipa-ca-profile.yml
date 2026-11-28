@@ -4,11 +4,14 @@
 # Inputs (include vars):
 #   ipa_ca_profile_id:      profile id (e.g. kubeScheduler).
 #   ipa_ca_profile_desc:    profile description.
-#   ipa_ca_profile_file:    scratch .cfg path on the IPA server.
 #   ipa_ca_profile_subject: Dogtag subject template written to
 #                           policyset.serverCertSet.1.default.params.name.
 #   ipa_ca_profile_extra:   optional list of {line, regexp(optional)} entries added
 #                           to the .cfg (lineinfile semantics).
+#
+# The import scratch .cfg is an include-owned per-run tempfile on idm, minted
+# only inside the profile-missing block and removed at its end — steady state
+# never creates it and no residue lingers on idm.
 #
 # `ipa certprofile-show` exits rc=2 (NOT_FOUND) when the profile is absent.
 #
@@ -33,8 +36,18 @@
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   block:
+    - name: "Ipa-ca-profile | mint per-run import scratch file: {{ ipa_ca_profile_id }}"
+      # Include-owned tempfile instead of a fixed /tmp .cfg passed by the caller:
+      # this block runs only when the profile is absent (real creation), so the
+      # always-changed pair is truthful and the scratch never lingers on idm.
+      ansible.builtin.tempfile:
+        state: file
+        prefix: "profile-{{ ipa_ca_profile_id }}-"
+        suffix: .cfg
+      register: ipa_ca_profile_tmp
+
     - name: "Ipa-ca-profile | get the ipa default ca profile for: {{ ipa_ca_profile_id }}"
-      ansible.builtin.command: "ipa certprofile-show --out {{ ipa_ca_profile_file }} caIPAserviceCert"
+      ansible.builtin.command: "ipa certprofile-show --out {{ ipa_ca_profile_tmp.path }} caIPAserviceCert"
       no_log: "{{ secure_logs }}"
       changed_when: true
       environment:
@@ -42,7 +55,7 @@
 
     - name: "Ipa-ca-profile | customise the profile: {{ ipa_ca_profile_id }}"
       ansible.builtin.lineinfile:
-        path: "{{ ipa_ca_profile_file }}"
+        path: "{{ ipa_ca_profile_tmp.path }}"
         regexp: "{{ item.regexp | default(omit) }}"
         line: "{{ item.line }}"
       loop: "{{ _ipa_ca_profile_lines }}"
@@ -58,9 +71,14 @@
     - name: "Ipa-ca-profile | import the profile: {{ ipa_ca_profile_id }}"
       ansible.builtin.command: >-
         ipa certprofile-import {{ ipa_ca_profile_id }}
-        --file {{ ipa_ca_profile_file }}
+        --file {{ ipa_ca_profile_tmp.path }}
         --desc "{{ ipa_ca_profile_desc }}" --store TRUE
       no_log: "{{ secure_logs }}"
       changed_when: true
       environment:
         KRB5CCNAME: "{{ kube_scratch_cache_dir }}/admin.ca_provision.ccache"
+
+    - name: "Ipa-ca-profile | remove the run import scratch file: {{ ipa_ca_profile_id }}"
+      ansible.builtin.file:
+        path: "{{ ipa_ca_profile_tmp.path }}"
+        state: absent

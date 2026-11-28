@@ -183,5 +183,16 @@
   loop:
     - "{{ kubernetes_certificates_path }}ca.crt.kubeadm"
     - "{{ kubernetes_certificates_path }}ca.key"
-    - /tmp/kube-api-gate-anchor.crt
   become: true
+
+# The gate anchor is a run-scoped tempfile minted by ipa-certs.yml only while
+# the old-cert window was open (same master play, so the registered fact is
+# visible here). On steady state or repair paths that never built it, the
+# registered fact carries no path and this task skips — zero changed, and there
+# is no fixed name left to sweep.
+- name: Ipa-pki-swap | remove the run gate anchor tempfile
+  ansible.builtin.file:
+    path: "{{ kube_gate_anchor_tmp.path }}"
+    state: absent
+  become: true
+  when: kube_gate_anchor_tmp is defined and kube_gate_anchor_tmp is not skipped and kube_gate_anchor_tmp.path is defined
