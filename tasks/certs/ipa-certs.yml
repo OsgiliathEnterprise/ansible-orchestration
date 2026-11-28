@@ -173,7 +173,8 @@
       # No changed_when override: the block runs only on drift, so the shell's
       # own changed report is truthful.
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show {{ ipa_kubernetes_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.new
+        set -o pipefail
+        ipa ca-show {{ ipa_kubernetes_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.new
       no_log: "{{ secure_logs }}"
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
@@ -182,8 +183,10 @@
 
     - name: "Ipa-certs | download kubeclusteradm CA (CA #2) from IPA to the run fetch directory"
       ansible.builtin.shell: |
-        set -o pipefail && ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.kubeclusteradm
+        set -o pipefail
+        ipa ca-show {{ ipa_kubeclusteradm_ca_name }} --certificate-out={{ kube_ca_fetch_tmp.path }}/ca.crt.kubeclusteradm
       no_log: "{{ secure_logs }}"
+      changed_when: false
       delegate_to: "{{ groups[idm_group] | first }}"
       become: true
       environment:

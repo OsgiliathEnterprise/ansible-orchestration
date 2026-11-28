@@ -412,8 +412,7 @@
     # original error is never masked. Shell exceptions (AGENTS.md): journalctl, crictl and
     # ipa-getcert have no native Ansible equivalents; all captures are read-only.
     - name: Kube-install-join | capture kubelet logs since join start
-      ansible.builtin.shell: |
-        journalctl -u kubelet --no-pager --since "{{ kube_join_started_at.stdout | default('') }}" -n 300
+      ansible.builtin.command: journalctl -u kubelet --no-pager --since "{{ kube_join_started_at.stdout | default('') }}" -n 300
       become: true
       changed_when: false
       failed_when: false
