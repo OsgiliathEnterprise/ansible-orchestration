@@ -1,66 +1,136 @@
 ---
-- name: Persistent-volume | create temp directory to host template
-  changed_when: false
-  ansible.builtin.tempfile:
+# PV lifecycle is driven by the rendered manifest: the manifest is rendered to a
+# fixed path every run (content-idempotent), read back as the single source of
+# truth for the desired spec, and compared against the live object. The
+# delete+recreate only runs when the PV is missing, its spec drifted, or it sits
+# Released (Retain policy blocks re-binding a fresh PVC) — previously the PV was
+# deleted and recreated on EVERY converge.
+
+- name: Persistent-volume | compute live PV name
+  # Must match metadata.name in templates/persistent-volume.yml.j2 exactly:
+  # the live read and the deletes below look the PV up by this name, and a
+  # mismatch made the gate always conclude "PV missing" (deletes became no-ops
+  # against the wrong name and only the manifest apply ever touched the object).
+  ansible.builtin.set_fact:
+    persistent_volume_name: "nfs-{{ nfs_mountpoint.remote | replace('/', '') }}-{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
+
+- name: Persistent-volume | ensure PV manifest directory
+  ansible.builtin.file:
+    path: /run/kube-nfs-pv
     state: directory
-    suffix: pv
-  delegate_to: "{{ groups['kube_master'] | first }}"
-  register: persistent_volumes_temp_directory
+    mode: '0700'
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
 
-- name: Persistent-volume | remove old PV if it exists (nfs-prefixed)
-  kubernetes.core.k8s:
-    state: absent
+- name: Persistent-volume | render desired PV manifest
+  ansible.builtin.template:
+    src: persistent-volume.yml.j2
+    dest: /run/kube-nfs-pv/pv.yml
+    mode: '0600'
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+
+- name: Persistent-volume | read back rendered PV manifest
+  # Read-only file read: changed_when: false is truthful, not a mask.
+  ansible.builtin.slurp:
+    path: /run/kube-nfs-pv/pv.yml
+  changed_when: false
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  become: true
+  register: persistent_volume_desired_slurp
+
+- name: Persistent-volume | read live PersistentVolumes
+  # Read-only inventory call: changed_when: false is truthful, not a mask.
+  # List form on purpose: the name-get form (name: parameter) returned an empty
+  # resources list even while the PV existed (kubectl and the same module's
+  # src-based apply both saw the object), which made the gate below conclude
+  # "PV missing" on every run. The gate filters the list by name instead.
+  kubernetes.core.k8s_info:
     api_version: v1
     kind: PersistentVolume
-    name: "nfs{{ nfs_mountpoint.remote | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
     ca_cert: "{{ kube_cacert_path | default(omit) }}"
     client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
     client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
     kubeconfig: "{{ kube_config_path }}"
     context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  failed_when: false
-  delegate_to: "{{ groups['kube_master'] | first }}"
+  changed_when: false
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
   become: true
+  register: persistent_volume_live
 
-- name: Persistent-volume | remove old PV if it exists (local-prefixed)
-  kubernetes.core.k8s:
-    state: absent
-    api_version: v1
-    kind: PersistentVolume
-    name: "{{ nfs_mountpoint.local | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
-    ca_cert: "{{ kube_cacert_path | default(omit) }}"
-    client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
-    client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
-    kubeconfig: "{{ kube_config_path }}"
-    context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  failed_when: false
-  delegate_to: "{{ groups['kube_master'] | first }}"
+- name: Persistent-volume | decide whether the live PV must be recreated
+  # Pure comparison over the binding-relevant spec fields (claimRef and other
+  # API-server-managed fields are excluded on purpose) plus the Released-phase
+  # repair case. No shell: the decision cannot desync from the applied manifest
+  # because the desired spec is parsed from the rendered file itself. The
+  # json_query multi-select yields null for absent fields on both sides, so a
+  # missing-vs-missing field compares equal.
+  ansible.builtin.set_fact:
+    pv_recreate_needed: >-
+      {{ not persistent_volume_exists
+         or pv_want_fields != pv_have_fields
+         or pv_live_phase == 'Released' }}
+  vars:
+    pv_spec_fields: "[capacity, accessModes, persistentVolumeReclaimPolicy, storageClassName, volumeMode, nfs]"
+    pv_desired_doc: "{{ (persistent_volume_desired_slurp.content | b64decode) | from_yaml }}"
+    pv_all_pvs: "{{ persistent_volume_live.resources | default([]) }}"
+    pv_live_resources: "{{ pv_all_pvs | selectattr('metadata.name', 'equalto', persistent_volume_name) | list }}"
+    persistent_volume_exists: "{{ pv_live_resources | length > 0 }}"
+    pv_live_doc: "{{ pv_live_resources | first if persistent_volume_exists else {} }}"
+    pv_live_phase: "{{ pv_live_doc.status.phase | default('') }}"
+    pv_want_fields: >-
+      {{ pv_desired_doc.spec | default({}) | community.general.json_query(pv_spec_fields) }}
+    pv_have_fields: >-
+      {{ pv_live_doc.spec | default({}) | community.general.json_query(pv_spec_fields) }}
+
+- name: Persistent-volume | recreate PersistentVolume (missing, drifted, or Released)
+  when: pv_recreate_needed | bool
   become: true
+  delegate_to: "{{ groups[kube_masters_group] | first }}"
+  block:
+    - name: Persistent-volume | remove old PV if it exists (current name)
+      # Same fact as the gate above: when a recreate is genuinely needed, the
+      # delete must address the object the gate looked at, otherwise the apply
+      # below collides with the surviving PV.
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: PersistentVolume
+        name: "{{ persistent_volume_name }}"
+        ca_cert: "{{ kube_cacert_path | default(omit) }}"
+        client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+        client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+        kubeconfig: "{{ kube_config_path }}"
+        context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
+
+    - name: Persistent-volume | remove old PV if it exists (local-prefixed)
+      kubernetes.core.k8s:
+        state: absent
+        api_version: v1
+        kind: PersistentVolume
+        name: "{{ nfs_mountpoint.local | replace('/', '') }}{{ kube_volume_to_mount.subtree | default('root') | replace('/', '') }}"
+        ca_cert: "{{ kube_cacert_path | default(omit) }}"
+        client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+        client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+        kubeconfig: "{{ kube_config_path }}"
+        context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
+
+    - name: Persistent-volume | apply PersistentVolume from rendered manifest
+      kubernetes.core.k8s:
+        state: present
+        src: /run/kube-nfs-pv/pv.yml
+        ca_cert: "{{ kube_cacert_path | default(omit) }}"
+        client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
+        client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
+        kubeconfig: "{{ kube_config_path }}"
+        context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
 
 - name: Persistent-volume | ensure subtree directory exists on NFS server
   ansible.builtin.file:
-    path: "{{ nfs_mountpoint.remote + (kube_volume_to_mount.subtree | default('')) }}"
+    path: "{{ nfs_mountpoint.base | default('/srv/nfs') }}/{{ nfs_mountpoint.remote | regex_replace('^/', '') }}{{ kube_volume_to_mount.subtree | default('') }}"
     state: directory
+    owner: root
+    group: root
     mode: '0755'
   delegate_to: "{{ nfs_mountpoint.nfs_server }}"
-  become: true
-
-- name: Persistent-volume | create persistent volume file
-  ansible.builtin.template:
-    src: persistent-volume.yml.j2
-    dest: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
-    mode: '0600'
-  delegate_to: "{{ groups['kube_master'] | first }}"
-
-- name: Persistent-volume | execute kubectl apply
-  kubernetes.core.k8s:
-   state: present
-   src: "{{ persistent_volumes_temp_directory.path }}/pv.yml"
-   ca_cert: "{{ kube_cacert_path | default(omit) }}"
-   client_cert: "{{ kube_sysadmin_client_cert_path | default(omit) }}"
-   client_key: "{{ kube_sysadmin_client_key_path | default(omit) }}"
-   kubeconfig: "{{ kube_config_path }}"
-   context: "{{ kube_context | default('kubernetes-admin@kubernetes') }}"
-  failed_when: false
-  delegate_to: "{{ groups['kube_master'] | first }}"
   become: true

@@ -18,26 +18,34 @@
 # cert, the whole file is a no-op. The scheduler's re-issue is gated independently in
 # ipa-scheduler-client.yml.
 
-# --- gate: is the controller-manager cert already CA #2-signed? ---
+# --- gate: is the controller-manager cert already CA #2-signed and in force? ---
+# Replay when the embedded cert is missing, kubeadm-signed (NOT-CA2), or near expiry
+# (EXPIRING, kube_cert_renewal_threshold_days) — so a short-Validity CA re-issue is
+# picked up by a reconverge instead of being skipped forever.
 # (shell exception: no native module extracts an embedded client certificate from a
-# kubeconfig and reports its issuer; this is strictly read-only.)
-- name: Ipa-controller-manager-client | extract controller-manager client cert issuer from controller-manager.conf
+# kubeconfig and reports its issuer/validity; this is strictly read-only.)
+- name: Ipa-controller-manager-client | extract controller-manager client cert issuer and validity from controller-manager.conf
   ansible.builtin.shell: |
     set -o pipefail
     b64=$(grep 'client-certificate-data' /etc/kubernetes/controller-manager.conf | awk '{print $2}')
-    echo "$b64" | base64 -d > /tmp/controller-manager-current.crt
-    if openssl x509 -in /tmp/controller-manager-current.crt -noout -issuer | grep -q "{{ ipa_kubeclusteradm_ca_name }}"; then
-      echo "CA2-SIGNED"
-    else
+    if [ -z "$b64" ]; then echo "NOT-CA2"; exit 0; fi
+    crt=$(mktemp)
+    trap 'rm -f "$crt"' EXIT
+    printf '%s' "$b64" | base64 -d > "$crt"
+    if ! openssl x509 -in "$crt" -noout -checkend $(({{ kube_cert_renewal_threshold_days }} * 86400)) >/dev/null 2>&1; then
+      end=$(openssl x509 -in "$crt" -noout -enddate | cut -d= -f2)
+      echo "EXPIRING $end"
+    fi
+    if ! openssl x509 -in "$crt" -noout -issuer | grep -q "{{ ipa_kubeclusteradm_ca_name }}"; then
       echo "NOT-CA2"
     fi
   become: true
   changed_when: false
   register: cm_cert_issuer
 
-- name: "Ipa-controller-manager-client | controller-manager cert not yet CA #2-signed"
+- name: "Ipa-controller-manager-client | controller-manager cert needs re-issuance"
   ansible.builtin.set_fact:
-    cm_swap_needed: "{{ 'NOT-CA2' in cm_cert_issuer.stdout }}"
+    cm_swap_needed: "{{ 'NOT-CA2' in cm_cert_issuer.stdout or 'EXPIRING' in cm_cert_issuer.stdout }}"
 
 # --- controller-manager client certificate ---
 - name: Ipa-controller-manager-client | create controller-manager-client private key

@@ -126,10 +126,24 @@
   register: kube_admin_csr
   when: not kube_admin_cert_stat.stat.exists
 
+- name: Admin-user | mint per-run enrollment staging directory on idm
+  # Per-run root-only tempdir instead of fixed /tmp/kube-admin-enroll.{csr,crt}:
+  # only minted when the admin cert is absent (real enrollment), never leaves
+  # residue, and concurrent enrollments against the shared idm host cannot
+  # collide. The always-changed tempfile pair is truthful inside this gate.
+  # No mode parameter (tempfile has none): mkdtemp creates the directory
+  # root-owned 0700 by default.
+  ansible.builtin.tempfile:
+    state: directory
+  register: kube_admin_enroll_tmp
+  delegate_to: "{{ groups[idm_group] | first }}"
+  become: true
+  when: not kube_admin_cert_stat.stat.exists
+
 - name: Admin-user | stage admin client csr on idm for enrollment
   ansible.builtin.copy:
     content: "{{ kube_admin_csr.content | b64decode }}"
-    dest: /tmp/kube-admin-enroll.csr
+    dest: "{{ kube_admin_enroll_tmp.path }}/enroll.csr"
     mode: "0600"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
@@ -150,8 +164,8 @@
   freeipa.ansible_freeipa.ipacert:
     ca: "{{ ipa_kubeclusteradm_ca_name }}"
     principal: "{{ ipa_kube_admin_principal }}"
-    csr_file: /tmp/kube-admin-enroll.csr
-    certificate_out: /tmp/kube-admin-enroll.crt
+    csr_file: "{{ kube_admin_enroll_tmp.path }}/enroll.csr"
+    certificate_out: "{{ kube_admin_enroll_tmp.path }}/enroll.crt"
     profile_id: kubeAdministrators
     state: requested
   delegate_to: "{{ groups[idm_group] | first }}"
@@ -163,7 +177,7 @@
 
 - name: Admin-user | slurp enrolled admin client cert from idm
   ansible.builtin.slurp:
-    src: /tmp/kube-admin-enroll.crt
+    src: "{{ kube_admin_enroll_tmp.path }}/enroll.crt"
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
   register: kube_admin_crt
@@ -177,15 +191,25 @@
   become: true
   when: not kube_admin_cert_stat.stat.exists
 
-- name: Admin-user | clean up staged temp files on idm
+- name: Admin-user | clean up the staging directory on idm
+  # Steady state (cert exists): the tempdir was never minted, the registered
+  # fact carries no path, the task skips — zero changed, nothing to sweep.
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ kube_admin_enroll_tmp.path }}"
     state: absent
   delegate_to: "{{ groups[idm_group] | first }}"
   become: true
-  loop:
-    - /tmp/kube-admin-enroll.csr
-    - /tmp/kube-admin-enroll.crt
+  when: kube_admin_enroll_tmp is not skipped and kube_admin_enroll_tmp.path is defined
+
+- name: Admin-user | read current admin.conf client-certificate reference
+  # Read-only end-state probe (same jsonpath as the verify task below; it must
+  # descend through `.user`). Registers the value that gates the re-embed.
+  ansible.builtin.command: >-
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf config view --minify
+    -o jsonpath='{.users[?(@.name=="kubernetes-admin")].user.client-certificate}'
+  become: true
+  register: kube_admin_conf_cert_before
+  changed_when: false
 
 - name: Admin-user | patch admin.conf user entry with IPA-issued client certificate
   # Shell required: the kubernetes.core.k8s module cannot patch the kubeconfig file
@@ -197,6 +221,11 @@
   # (`|| true`: absent on a hand-edited config). The kubeadm-generated admin.conf
   # user is `kubernetes-admin` and its context `kubernetes-admin@kubernetes` —
   # root's kubectl default, which this patch re-points at the IPA-issued pair.
+  # Idempotence: gated on the read-only probe above — the patch runs only when the
+  # user entry does not already reference the IPA-issued pair. The explicit
+  # changed_when mirrors the gate: whenever the task executes it really rewrites
+  # admin.conf, so change reporting is truthful rather than blanket-suppressed.
+  # It also replays after a re-issued kubeadm.crt or a reverted admin.conf.
   ansible.builtin.shell: |
     set -e
     kubectl config set-credentials kubernetes-admin --client-certificate="{{ kube_credential_folder }}/kubeadm.crt" --client-key="{{ kube_credential_folder }}/kubeadm.pem" --kubeconfig=/etc/kubernetes/admin.conf
@@ -204,7 +233,8 @@
     kubectl config unset kubernetes-admin.client-key-data --kubeconfig=/etc/kubernetes/admin.conf || true
     kubectl config use-context kubernetes-admin@kubernetes --kubeconfig=/etc/kubernetes/admin.conf
   become: true
-  changed_when: false
+  when: kube_admin_conf_cert_before.stdout != kube_credential_folder + '/kubeadm.crt'
+  changed_when: kube_admin_conf_cert_before.stdout != kube_credential_folder + '/kubeadm.crt'
 
 - name: Admin-user | verify admin.conf references the IPA-issued certificate
   # Read-only kubeconfig inspection (config view): changed_when: false is

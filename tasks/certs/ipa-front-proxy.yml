@@ -1,5 +1,34 @@
 ---
 
+# Steady-state gate: read the on-disk front-proxy client cert's issuer and validity.
+# When the cert is present, issued by CA #2 (kubeclusteradm) and outside the renewal
+# threshold, the whole enrollment chain below is skipped — otherwise the removal loop
+# forced a full re-enrollment (new key + CSR + ipacert re-request) on every converge.
+# Replay when the cert is missing, kubeadm-signed (NOT-CA2), or near expiry
+# (kube_cert_renewal_threshold_days).
+- name: Ipa-front-proxy | read front-proxy client cert issuer and validity for the gate
+  ansible.builtin.shell: |
+    set -o pipefail
+    crt="{{ kubernetes_certificates_path }}front-proxy-client.crt"
+    if [ ! -f "$crt" ]; then echo "NOT-CA2"; exit 0; fi
+    issuer=$(openssl x509 -in "$crt" -noout -issuer 2>/dev/null || echo MISSING)
+    end=$(openssl x509 -in "$crt" -noout -enddate 2>/dev/null | cut -d= -f2)
+    if ! openssl x509 -in "$crt" -noout -checkend $(({{ kube_cert_renewal_threshold_days }} * 86400)) >/dev/null 2>&1; then
+      echo "EXPIRING $end"
+    fi
+    echo "$issuer"
+  args:
+    executable: /bin/bash
+  register: fp_cert_issuer
+  changed_when: false
+  become: true
+
+- name: Ipa-front-proxy | decide whether the front-proxy cert must be re-issued
+  ansible.builtin.set_fact:
+    fp_swap_needed: "{{ 'NOT-CA2' in fp_cert_issuer.stdout
+                        or 'EXPIRING' in fp_cert_issuer.stdout
+                        or ipa_kubeclusteradm_ca_name not in fp_cert_issuer.stdout }}"
+
 - name: Ipa-front-proxy | remove kubeadm front-proxy cert so IPA-signed one is created
   ansible.builtin.file:
     path: "{{ item }}"
@@ -9,11 +38,13 @@
     - "{{ kubernetes_certificates_path }}front-proxy-client.key"
     - "{{ kubernetes_certificates_path }}front-proxy-client.csr"
   become: true
+  when: fp_swap_needed
 
 - name: Ipa-front-proxy | create front-proxy-client private key
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}front-proxy-client.key"
   become: true
+  when: fp_swap_needed
 
 - name: Ipa-front-proxy | create front-proxy-client csr
   community.crypto.openssl_csr:
@@ -29,6 +60,7 @@
     extended_key_usage:
       - clientAuth
   become: true
+  when: fp_swap_needed
 
 # The master owns this certificate's identity, so it authenticates the request
 # with its own host ticket (C3): the shared phase ticket minted once by
@@ -45,5 +77,6 @@
     state: requested
   no_log: "{{ secure_logs }}"
   become: true
+  when: fp_swap_needed
   environment:
     KRB5CCNAME: "{{ kube_cert_enroll_ccache }}"

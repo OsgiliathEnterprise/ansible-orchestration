@@ -8,12 +8,7 @@
     group: root
     mode: '0644'
   become: true
-
-- name: Firewall | Restart NetworkManager
-  ansible.builtin.service:
-    name: NetworkManager
-    state: restarted
-  become: true
+  notify: ansible-orchestration | restart NetworkManager
 
 - name: Firewall | Add node to Sourced trusted zone on masters
   ansible.posix.firewalld:

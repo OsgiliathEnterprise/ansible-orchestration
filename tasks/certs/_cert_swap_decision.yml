@@ -1,0 +1,67 @@
+---
+# Shared issuer/validity decision gate for certificate swap/issuance steps.
+#
+# Generalizes the proven ipa-controller-manager-client.yml / ipa-scheduler-client.yml
+# issuer-only idiom: the gate decides whether an IPA-issued certificate must be
+# (re-)provisioned or a manifest must consume the current on-disk certificate.
+# It REPLAYS — never skips forever — when any of these is true:
+#   - the certificate file is missing;
+#   - the issuer is not the expected IPA CA (operator swap, wrong CA, kubeadm self-signed);
+#   - the certificate is at or within the shared renewal threshold of expiry
+#     (same threshold the systemd timer and the ipa-cert-renewal.yml profile gate use,
+#     so a certificate the out-of-band timer failed to renew is repaired by converge);
+#   - (optional) the issuing CA itself is at or within the threshold of expiry.
+#
+# Inputs:
+#   cert_swap_cert_path            certificate to judge (required)
+#   cert_swap_expected_issuer      substring the issuer DN must contain (required),
+#                                  e.g. "kubernetes-ca" (CA #1) or "kube-clusteradm-ca" (CA #2)
+#   cert_swap_ca_cert_path         optional CA certificate whose own validity is also gated
+#   cert_swap_threshold_days       optional per-call threshold; defaults to
+#                                  kube_cert_renewal_threshold_days (single source)
+#   cert_swap_decision_fact        name of the boolean fact to set (required):
+#                                  true = swap/issuance needed, false = current state accepted
+#
+# The script is strictly read-only (openssl x509 inspection only), so
+# changed_when: false is truthful here, not a blanket mask.
+
+- name: Cert-swap-decision | evaluate issuer and validity of {{ cert_swap_cert_path }}
+  ansible.builtin.shell: |
+    set -euo pipefail
+    CERT="{{ cert_swap_cert_path }}"
+    THRESH="{{ cert_swap_threshold_days | default(kube_cert_renewal_threshold_days) }}"
+    EXPECTED="{{ cert_swap_expected_issuer }}"
+    if [ ! -f "$CERT" ]; then
+      echo "CERT-MISSING"
+      exit 0
+    fi
+    ISSUER=$(openssl x509 -in "$CERT" -noout -issuer 2>/dev/null || true)
+    case "$ISSUER" in
+      *"$EXPECTED"*) ;;
+      *) echo "NOT-EXPECTED-CA"
+         exit 0 ;;
+    esac
+    # Validity gate: the leaf must stay valid for more than the threshold days.
+    if ! openssl x509 -in "$CERT" -noout -checkend $(( THRESH * 86400 )) >/dev/null 2>&1; then
+      echo "NEAR-EXPIRY"
+      exit 0
+    fi
+    {% if cert_swap_ca_cert_path is defined %}
+    # CA validity gate: a sub-CA nearing expiry requires re-issuance planning;
+    # treat it as needing the swap flow (which re-enrolls/redeploys) now rather
+    # than after the CA dies.
+    if ! openssl x509 -in "{{ cert_swap_ca_cert_path }}" -noout -checkend $(( THRESH * 86400 )) >/dev/null 2>&1; then
+      echo "CA-NEAR-EXPIRY"
+      exit 0
+    fi
+    {% endif %}
+    echo "SWAP-NOT-NEEDED"
+  args:
+    executable: /bin/bash
+  register: cert_swap_decision_result
+  changed_when: false
+  # Read-only certificate inspection.
+
+- name: Cert-swap-decision | register decision fact {{ cert_swap_decision_fact }}
+  ansible.builtin.set_fact:
+    "{{ cert_swap_decision_fact }}": "{{ (cert_swap_decision_result.stdout_lines | last | default('CERT-MISSING') | trim) != 'SWAP-NOT-NEEDED' }}"

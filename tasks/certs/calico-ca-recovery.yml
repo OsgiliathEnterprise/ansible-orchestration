@@ -52,13 +52,29 @@
   # safe because the CNI does not depend on the dying pod's processes (measured ~3s handoff
   # old->new); the accepted cost is a ~10-30s per-node data-plane overlap window during a
   # CA-triggered restart.
-  # The restartedAt annotation value is the current CA fingerprint, so this fires only when the CA
-  # actually changed: re-converge with an unchanged CA is a no-op (no workload churn).
+  # The patch is gated on the pod-template restartedAt annotation differing from the current CA
+  # fingerprint (computed from the DaemonSet the detect task already read - no extra API call).
+  # A kubernetes.core.k8s merge patch reports changed even when semantically empty, and the
+  # Tigera operator deliberately reverts live maxUnavailable to 1 after each patch, so an
+  # unconditional patch would churn the rollout on every converge. Skipping the patch when the
+  # annotation already matches the CA is safe: maxUnavailable 100% only matters during a
+  # CA-triggered restart, and the operator's reverted value is exactly what the previous
+  # CA-triggered rollout completed with.
   # Block-level guard makes this a true no-op when Calico is absent: without it, k8s (state:
   # present) would try to CREATE a bare (invalid) calico-node DaemonSet and the rescue would
   # fail the converge.
   when: calico_node_ds.resources | length > 0
   block:
+    - name: Calico-ca-recovery | decide whether the calico-node template needs the CA-trigger patch
+      # Single source of truth for the gate: the annotation set by the patch task below.
+      # Missing annotation (operator never saw a CA-triggered restart) or a fingerprint from an
+      # older CA -> patch needed. Matches current fingerprint -> steady state, skip the patch.
+      ansible.builtin.set_fact:
+        calico_recovery_patch_needed: >-
+          {{ (calico_node_ds.resources[0].spec.template.metadata.annotations
+              | default({})).restartedAt | default('')
+              != 'ca-' ~ calico_ca_fingerprint }}
+
     - name: Calico-ca-recovery | wait for all nodes to report Ready before the cluster-wide restart
       # Cluster-wide Node list (not a master-only query): the gate must cover the workers too.
       # Every node must carry a Ready=True condition; nodes whose status or conditions are not
@@ -138,6 +154,7 @@
                      if (calico_recovery_max_unavailable | trim | string) is match('^[0-9]+$')
                      else calico_recovery_max_unavailable | trim }}
       become: true
+      when: calico_recovery_patch_needed | bool
 
     - name: Calico-ca-recovery | set expected calico-node pod count (one per cluster node)
       ansible.builtin.set_fact:

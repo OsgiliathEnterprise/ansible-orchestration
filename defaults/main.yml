@@ -19,6 +19,10 @@ ipa_kube_admin_email: "clusteradmin.kubeclusteradm@osgiliath.test"
 # kubeadm-generated controller-manager/scheduler client certs; CA #2 is the
 # kubeclusteradm CA. See tasks/certs/ipa-kubeclusteradm-ca.yml.
 ipa_kubeclusteradm_ca_name: "kubeclusteradm"
+# CA #1 name (serving cert / trust anchor). Matches the literal ipa_ca_ensure_name
+# used by tasks/certs/ipa-kubernetes-ca.yml; used as the expected issuer by the
+# apiserver serving-cert idempotence gate in tasks/certs/ipa-certs.yml.
+ipa_kubernetes_ca_name: "kubernetes-ca"
 kube_cidr: "192.168.0.0/16" # Matches with coredns spec.clusterIPs
 kube_service_cidr: "10.96.0.0/12"
 orchestration_kube_dns_ip: "10.96.0.10"
@@ -116,6 +120,11 @@ kube_scratch_cache_dir: /run/krb5cc
 # master cert files inherit it via env: KRB5CCNAME instead of minting their
 # own per-file ticket.
 kube_cert_enroll_ccache: "{{ kube_scratch_cache_dir }}/host_master.cert_enroll.ccache"
+# Single source for the certificate renewal threshold (days). The converge-time
+# issuer/validity gates (_cert_swap_decision.yml and the *_swap_needed shell
+# reads) and the systemd kube-cert-renew timer both read this variable, so the
+# converge gate and the timer can never disagree on when a cert is "near expiry".
+kube_cert_renewal_threshold_days: 30
 # systemd StateDirectory of the kube-cert-renew unit: the unit-scoped ticket
 # cache (Environment=KRB5CCNAME=FILE:<dir>/ccache) and the master-side copy of
 # the kubeclusteradm renewal keytab live here — the timer never touches /tmp.

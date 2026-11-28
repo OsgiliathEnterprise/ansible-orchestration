@@ -7,3 +7,13 @@
     name: containerd
   become: true
   listen: ansible-orchestration | refresh containerd
+
+- name: Handler | restart NetworkManager
+  # Fired only when the calico.conf drop-in actually changed; in steady state the
+  # copy is content-idempotent so the handler never runs and host networking is
+  # not disrupted for nothing.
+  ansible.builtin.service:
+    name: NetworkManager
+    state: restarted
+  become: true
+  listen: ansible-orchestration | restart NetworkManager

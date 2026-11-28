@@ -1,5 +1,35 @@
 ---
 
+# Idempotence gate: the enrollment pipeline (remove + key + CSR + ipacert) always
+# re-issues, which churns kubelet credentials and restarts. The replay only runs when
+# the on-disk client cert is missing, not issued by CA #2 (kubeclusteradm), or within
+# the renewal threshold — so near-expiry still replays. Mirrors the
+# ipa-controller-manager-client.yml idiom.
+- name: Kube-apiserver-kubelet-client | read current client cert issuer and validity
+  ansible.builtin.shell: |
+    set -eu
+    CRT="{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
+    if [ ! -s "$CRT" ]; then
+      echo "NOT-CA2"
+      exit 0
+    fi
+    openssl x509 -in "$CRT" -noout -issuer
+    if ! openssl x509 -in "$CRT" -noout -checkend $(({{ kube_cert_renewal_threshold_days }} * 86400)); then
+      echo "EXPIRING $(openssl x509 -in "$CRT" -noout -enddate)"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  register: kubelet_client_cert_state
+
+- name: Kube-apiserver-kubelet-client | decide whether the client cert must be re-issued
+  ansible.builtin.set_fact:
+    kubelet_client_swap_needed: >-
+      {{ (kubelet_client_cert_state.stdout | default('') is search('NOT-CA2')) or
+         (kubelet_client_cert_state.stdout | default('') is search('EXPIRING')) or
+         (kubelet_client_cert_state.stdout | default('') is not search(ipa_kubeclusteradm_ca_name)) }}
+
 - name: Kube-apiserver-kubelet-client | remove kubeadm kubelet-client cert so IPA-signed one is created
   ansible.builtin.file:
     path: "{{ item }}"
@@ -8,12 +38,14 @@
     - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
     - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
     - "{{ kubernetes_certificates_path }}apiserver-kubelet-client.csr"
+  when: kubelet_client_swap_needed
   become: true
 
 - name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client certs
   community.crypto.openssl_privatekey:
     path: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.key"
   become: true
+  when: kubelet_client_swap_needed
 
 - name: Kube-apiserver-kubelet-client | create kube-apiserver-kubelet-client csr
   community.crypto.openssl_csr:
@@ -43,6 +75,7 @@
     certificate_out: "{{ kubernetes_certificates_path }}apiserver-kubelet-client.crt"
     profile_id: kubeAdministrators
     state: requested
+  when: kubelet_client_swap_needed
   no_log: "{{ secure_logs }}"
   become: true
   environment:
@@ -117,9 +150,13 @@
   register: kubelet_drop_in
 
 - name: Kube-apiserver-kubelet-client | remove kubeadm client cert store (rotation target)
+  # One-time cleanup when swapping away from the kubeadm rotation store: the kubelet
+  # recreates this directory itself, so deleting it on every reconverge churns forever.
+  # It runs only while the cert pipeline replays (new key/CSR being issued).
   ansible.builtin.file:
     path: /var/lib/kubelet/pki
     state: absent
+  when: kubelet_client_swap_needed
   become: true
 
 - name: Kube-apiserver-kubelet-client | remove orphaned bootstrap kubeconfig

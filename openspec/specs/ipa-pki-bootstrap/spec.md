@@ -213,15 +213,15 @@ the two IPA-issued CAs.
 #### Scenario: Kubeadm CA artifacts deleted at end of swap
 - **WHEN** the swap completes on the master
 - **THEN** `/etc/kubernetes/pki/ca.crt.kubeadm` and `/etc/kubernetes/pki/ca.key` do not exist
-- **AND** the transient gate anchor `/tmp/kube-api-gate-anchor.crt` has been removed
+- **AND** the transient gate anchor, a run-scoped temporary file created only while the old-cert window is open, has been removed at its minted path regardless of its generated name
 
 #### Scenario: Transient old-cert window during the swap
 - **WHEN** a fresh cluster's API still presents the kubeadm-signed serving cert mid-swap
-- **THEN** the readiness gate MAY trust the kubeadm CA only through the `/tmp` anchor while `ca.crt.kubeadm` exists, and must fall back to a bundle-only anchor once the retained file is absent
+- **THEN** the readiness gate MAY trust the kubeadm CA only through the run-scoped temporary anchor while `ca.crt.kubeadm` exists, and must fall back to a bundle-only anchor once the retained file is absent
 
 #### Scenario: Re-converge after retirement
 - **WHEN** the role converges again with the kubeadm CA already retired
-- **THEN** the backup, gate-anchor slurp and deletion tasks all report no change and none fails, and `ca.crt.kubeadm` is not re-created from the swapped-in IPA CA
+- **THEN** the backup, gate-anchor slurp and deletion tasks all report no change and none fails (the anchor mint task is skipped because the old-cert window is closed), and `ca.crt.kubeadm` is not re-created from the swapped-in IPA CA
 
 ### Requirement: Pre-existing Calico/Tigera workloads trust the post-swap CA
 After the PKI swap replaces `/etc/kubernetes/pki/ca.crt` and restarts

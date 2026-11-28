@@ -35,11 +35,20 @@
     msg: "{{ 'control_plane' if kube_masters_group in group_names else ('node' if kube_nodes_group in group_names) }}"
   register: kube_node_role
 
-- name: Kube-install | Create temporary file for Calico configuration
-  ansible.builtin.tempfile:
+- name: Kube-install | Compute Calico configuration directory
+  # Stable location instead of a TemporaryFile: the temp directory was
+  # recreated (changed) on every reconverge and its content never cleaned.
+  # A fixed directory under the kubernetes home is idempotent by construction,
+  # and the template copy below is content-idempotent (checksum-gated).
+  ansible.builtin.set_fact:
+    calico_conf_dir:
+      path: "{{ kube_kubernetes_home_folder | default('/home/kubecreds') }}/calico-conf"
+
+- name: Kube-install | Ensure Calico configuration directory
+  ansible.builtin.file:
+    path: "{{ calico_conf_dir.path }}"
     state: directory
-    suffix: calico
-  register: calico_conf_dir
+    mode: '0755'
   become: True
 
 - name: Kube-install | Calico configuration template copy on remote
@@ -67,11 +76,36 @@
     msg: "{{ kube_alt_names | default(['api.kubernetes.' + company_domain]) + [orchestration_master_ip | ansible.utils.ipaddr] | list }}"
     verbosity: 2
 
+- name: Kubernetes | Determine expected IPA DNS server
+  ansible.builtin.set_fact:
+    kube_expected_dns_ip: >-
+      {{ hostvars[groups[idm_group][0]].ansible_default_ipv4.address
+         | default(hostvars[groups[idm_group][0]].ansible_host | default(''))
+         if idm_group in groups and groups[idm_group] | length > 0
+         else '' }}
+
+- name: Kubernetes | Check systemd-resolved DNS servers
+  ansible.builtin.command: resolvectl status
+  register: kube_resolved_status
+  changed_when: false
+  become: True
+
 - name: Kubernetes | Restart systemd-resolved # to be sure that the dns is using ipa
+  # Restart only when the IPA DNS server is not among the active DNS servers
+  # (or the expected address is unknown — preserve the old unconditional
+  # behaviour). The IPA client install lands IPA's DNS in resolved's per-link
+  # config; once it is live a restart is pure churn.
   ansible.builtin.service:
     name: systemd-resolved
     state: restarted
   become: True
+  when:
+    - >-
+      kube_expected_dns_ip | default('') | length == 0
+      or not (kube_resolved_status.stdout_lines
+              | select('search', 'DNS Server')
+              | select('search', kube_expected_dns_ip)
+              | list | length > 0)
 
 - name: Kube-install | debug kubernetes package version
   ansible.builtin.debug:
@@ -82,6 +116,17 @@
   ansible.builtin.stat:
     path: /etc/kubernetes/admin.conf
   register: kube_already_initialized
+  become: true
+
+# Join marker for workers: /etc/kubernetes/kubelet.conf is created by kubeadm join
+# (performed by kube-install-join-node.yml). Once a node has joined, re-running the
+# tcharl.kubernetes role is pure churn — its main.yml unconditionally restarts
+# containerd and kubelet on every run. Mirrors the admin.conf gate above: the role
+# runs on first install only.
+- name: Kube-install | Check if this node has already joined the cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kube_node_already_joined
   become: true
 
 # Pre-join CA hash computation removed.
@@ -95,7 +140,9 @@
 - name: Kube-install | Install Kubernetes using role
   ansible.builtin.include_role:
     name: tcharl.kubernetes
-  when: not kube_already_initialized.stat.exists
+  when:
+    - not kube_already_initialized.stat.exists
+    - not kube_node_already_joined.stat.exists
   vars:
     ansible_become: true
     kubernetes_version: "{{ k8s_version }}"
@@ -130,12 +177,18 @@
       resolvConf: /run/systemd/resolve/resolv.conf
 
 - name: Kube-install | Give secure permissions to kubernetes admin file
+  # First-install only: steady state is owned by ipa-pki-swap.yml, which relaxes
+  # the kubeconfigs to 0644 for the testinfra suite (root:root 0700 on the kubecreds
+  # dir already keeps them private). Re-applying 0600 on every reconverge created
+  # a mode ping-pong (0600 here -> 0644 there = two changes per run).
   ansible.builtin.file:
     path: "{{ kube_config_path }}"
     owner: root
     group: root
     mode: '0600'
-  when: kube_masters_group in group_names
+  when:
+    - kube_masters_group in group_names
+    - not kube_already_initialized.stat.exists
   become: yes
 
 - name: Kube-install | Wait for this node's calico-node pod to be Ready before restarting coredns
